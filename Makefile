@@ -58,6 +58,7 @@ lints: lint
 
 fix-py:
 	python -m isort csp/ examples/ setup.py
+	python -m ruff check --fix csp/ examples/ setup.py
 	python -m ruff format csp/ examples/ setup.py
 
 fix-cpp:
