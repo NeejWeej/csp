@@ -83,6 +83,8 @@ develop = [
     "sqlalchemy",  # db
     "threadpoolctl",  # test_random
     "tornado",  # profiler, perspective, websocket
+    # benchmarks
+    "asv",
 ]
 showgraph = [
     "graphviz",
