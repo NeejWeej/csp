@@ -40,7 +40,7 @@ lint-py:
 	python -m ruff format --check csp/ examples/ setup.py
 
 lint-cpp:
-	clang-format --dry-run -Werror -i -style=file `find ./cpp/ -type f -name "*.cpp" -o -name "*.h"`
+	clang-format --dry-run -Werror -i -style=file `find ./cpp/csp -type f -name "*.cpp" -o -name "*.h"`
 
 lint-docs:
 	python -m mdformat --check docs/wiki/ README.md examples/
@@ -57,7 +57,7 @@ fix-py:
 	python -m ruff format csp/ examples/ setup.py
 
 fix-cpp:
-	clang-format -i -style=file `find ./cpp/ -type f -name "*.cpp" -o -name "*.h"`
+	clang-format -i -style=file `find ./cpp/csp -type f -name "*.cpp" -o -name "*.h"`
 
 fix-docs:
 	python -m mdformat docs/wiki/ README.md examples/
