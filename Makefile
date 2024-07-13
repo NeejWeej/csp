@@ -46,8 +46,7 @@ lint-docs:
 	python -m mdformat --check docs/wiki/ README.md examples/
 	python -m codespell_lib docs/wiki/ README.md examples/ --skip "*.cpp,*.h"
 
-# lint: lint-py lint-cpp  ## run lints
-lint: lint-py lint-docs ## run lints
+lint: lint-py lint-cpp lint-docs ## run lints
 
 # Alias
 lints: lint
