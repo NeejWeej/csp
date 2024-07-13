@@ -6,6 +6,7 @@
 #include <csp/core/Platform.h>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 
 namespace csp
 {
