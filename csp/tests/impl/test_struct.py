@@ -1,12 +1,13 @@
 import enum
 import json
-import numpy as np
 import pickle
-import pytz
 import typing
 import unittest
 from datetime import date, datetime, time, timedelta
 from typing import Dict, List, Set, Tuple
+
+import numpy as np
+import pytz
 
 import csp
 from csp.impl.struct import define_nested_struct, define_struct, defineNestedStruct, defineStruct
