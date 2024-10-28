@@ -3,9 +3,11 @@
 namespace csp::adapters::websocket {
 using namespace csp;
 
-WebsocketEndpoint::WebsocketEndpoint( 
+WebsocketEndpoint::WebsocketEndpoint(
+    net::io_context& ioc,
     Dictionary properties 
-) : m_properties(properties)
+) : m_properties(properties),
+    m_ioc(ioc)
 { };
 void WebsocketEndpoint::setOnOpen(void_cb on_open)
 { m_on_open = std::move(on_open); }
@@ -21,7 +23,6 @@ void WebsocketEndpoint::setOnSendFail(string_cb on_send_fail)
 void WebsocketEndpoint::run()
 {
 
-    m_ioc.reset();
     if(m_properties.get<bool>("use_ssl")) {
         ssl::context ctx{ssl::context::sslv23};
         ctx.set_verify_mode(ssl::context::verify_peer );
@@ -49,8 +50,6 @@ void WebsocketEndpoint::run()
         );
     }
     m_session->run();
-
-    m_ioc.run();
 }
 
 void WebsocketEndpoint::stop()

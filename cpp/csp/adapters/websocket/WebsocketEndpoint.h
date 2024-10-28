@@ -340,7 +340,7 @@ private:
 
 class WebsocketEndpoint {
 public:
-    WebsocketEndpoint( Dictionary properties );
+    WebsocketEndpoint( net::io_context& ioc, Dictionary properties );
     virtual ~WebsocketEndpoint() { };
 
     void setOnOpen(void_cb on_open);
@@ -356,7 +356,7 @@ public:
 private:
     Dictionary m_properties;
     BaseWebsocketSession* m_session;
-    net::io_context m_ioc;
+    net::io_context& m_ioc;
     void_cb m_on_open;
     string_cb m_on_fail;
     char_cb m_on_message;
