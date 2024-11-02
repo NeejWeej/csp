@@ -79,7 +79,7 @@ public:
     void start( DateTime starttime, DateTime endtime ) override;
 
     void stop() override;
-    void send(const std::string& value, const int64_t & caller_id);
+    void send(const std::string& value, const size_t & caller_id);
 
     void handleConnectionRequest( const Dictionary & properties);
     void setupOneOffConnection( const std::string& endpoint_id, const Dictionary& properties );
@@ -90,18 +90,18 @@ public:
     void shutdownEndpoint(const std::string& endpoint_id);
 
 
-    void ensureVectorSize(std::vector<bool>& vec, int64_t caller_id);
+    void ensureVectorSize(std::vector<bool>& vec, size_t caller_id);
 
-    void ensureCallerVectorsSize(int64_t caller_id);
-    void addConsumer(const std::string& endpoint_id, int64_t caller_id);
+    void ensureCallerVectorsSize(size_t caller_id);
+    void addConsumer(const std::string& endpoint_id, size_t caller_id);
 
-    void addProducer(const std::string& endpoint_id, int64_t caller_id);
+    void addProducer(const std::string& endpoint_id, size_t caller_id);
 
     bool canRemoveEndpoint(const std::string& endpoint_id);
 
-    void removeConsumer(const std::string& endpoint_id, int64_t caller_id);
+    void removeConsumer(const std::string& endpoint_id, size_t caller_id);
 
-    void removeProducer(const std::string& endpoint_id, int64_t caller_id);
+    void removeProducer(const std::string& endpoint_id, size_t caller_id);
 
     PushInputAdapter * getInputAdapter( CspTypePtr & type, PushMode pushMode, const Dictionary & properties );
     OutputAdapter * getOutputAdapter( const Dictionary & properties );
@@ -111,6 +111,13 @@ public:
     DateTime processNextSimTimeSlice( DateTime time ) override;
 
 private:
+    inline size_t validateCallerId(int64_t caller_id) const {
+        if (caller_id < 0) {
+            CSP_THROW(ValueError, "caller_id cannot be negative: " << caller_id);
+        }
+        return static_cast<size_t>(caller_id);
+    }
+
     // need some client info
     // This is a tuple of
     // (number of send calls to uri, set of caller id's subscribed to uri )

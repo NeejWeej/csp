@@ -21,7 +21,9 @@ from csp.impl.wiring import input_adapter_def, output_adapter_def, status_adapte
 from csp.impl.wiring.delayed_node import DelayedNodeWrapperDef
 from csp.lib import _websocketadapterimpl
 
-from .websocket_types import ActionType, ConnectionRequest, InternalConnectionRequest, WebsocketHeaderUpdate
+from .websocket_types import ActionType, ConnectionRequest, WebsocketHeaderUpdate
+
+# InternalConnectionRequest,
 
 _ = (
     BytesMessageProtoMapper,
@@ -418,10 +420,11 @@ class WebsocketAdapterManager:
 
     def __init__(
         self,
-        uri: str,
+        uri: Optional[str] = None,
         reconnect_interval: timedelta = timedelta(seconds=2),
         headers: Dict[str, str] = None,
         dynamic: bool = False,
+        connection_request: Optional[ConnectionRequest] = None,
     ):
         """
         uri: str
@@ -433,10 +436,14 @@ class WebsocketAdapterManager:
         dynamic: bool = False
             Whether we accept dynamically altering the connections via ConnectionRequest objects.
         """
-        conn_request = ConnectionRequest(
-            uri=uri, action=ActionType.CONNECT, reconnect_interval=reconnect_interval, headers=headers or {}
-        )
-        self._properties = self._get_properties(conn_request=conn_request)
+        if connection_request is None:
+            connection_request = ConnectionRequest(
+                uri=uri, action=ActionType.CONNECT, reconnect_interval=reconnect_interval, headers=headers or {}
+            )
+        elif uri is not None:
+            raise ValueError("'connection_request' cannot be set along with 'uri'")
+
+        self._properties = self._get_properties(conn_request=connection_request)
         self._dynamic = dynamic
 
         # This is a counter that will be used to identify every function call
@@ -447,24 +454,25 @@ class WebsocketAdapterManager:
         # This maps types to their wrapper structs
         self._wrapper_struct_dict = {}
 
-    @staticmethod
-    def to_internal_connection_request(conn_req: ConnectionRequest) -> InternalConnectionRequest:
-        uri = conn_req.uri
-        reconnect_interval = conn_req.reconnect_interval
-        resp = urllib.parse.urlparse(uri)
-        if resp.hostname is None:
-            raise ValueError(f"Failed to parse host from URI: {uri}")
+    # @staticmethod
+    # def to_internal_connection_request(conn_req: ConnectionRequest) -> InternalConnectionRequest:
+    #     # TODO Use?
+    #     uri = conn_req.uri
+    #     reconnect_interval = conn_req.reconnect_interval
+    #     resp = urllib.parse.urlparse(uri)
+    #     if resp.hostname is None:
+    #         raise ValueError(f"Failed to parse host from URI: {uri}")
 
-        assert reconnect_interval >= timedelta(seconds=1)
-        conn_req_dict = ConnectionRequest.to_dict()
-        update_dict = dict(
-            use_ssl=uri.startswith("wss"),
-            route=resp.path or "/",  # resource shouldn't be empty string
-            host=resp.hostname,
-            port=_sanitize_port(uri, resp.port),
-        )
-        conn_req_dict.update(update_dict)
-        return InternalConnectionRequest(**conn_req_dict)
+    #     assert reconnect_interval >= timedelta(seconds=1)
+    #     conn_req_dict = ConnectionRequest.to_dict()
+    #     update_dict = dict(
+    #         use_ssl=uri.startswith("wss"),
+    #         route=resp.path or "/",  # resource shouldn't be empty string
+    #         host=resp.hostname,
+    #         port=_sanitize_port(uri, resp.port),
+    #     )
+    #     conn_req_dict.update(update_dict)
+    #     return InternalConnectionRequest(**conn_req_dict)
 
     def _get_properties(self, conn_request: ConnectionRequest) -> dict:
         uri = conn_request.uri
@@ -497,12 +505,12 @@ class WebsocketAdapterManager:
     @csp.node
     def _enrich_with_caller_id(
         self,
-        connection_requests: ts[ConnectionRequest],
+        connection_request: ts[ConnectionRequest],
         caller_id: int,
         is_subscribe: bool,
     ) -> ts[dict]:
-        if csp.ticked(connection_requests):
-            conn_prop = self._get_properties(connection_requests)
+        if csp.ticked(connection_request):
+            conn_prop = self._get_properties(connection_request)
             conn_prop["caller_id"] = caller_id
             conn_prop["is_subscribe"] = is_subscribe
             return conn_prop
@@ -514,7 +522,7 @@ class WebsocketAdapterManager:
         field_map: Union[dict, str] = None,
         meta_field_map: dict = None,
         push_mode: csp.PushMode = csp.PushMode.NON_COLLAPSING,
-        connection_requests: Optional[ts[List[ConnectionRequest]]] = None,
+        connection_request: Optional[ts[List[ConnectionRequest]]] = None,
     ):
         """If dynamic is True, this will tick a custom WrapperStruct,
         with 'raw_msg' as the correct type of the message.
@@ -527,17 +535,15 @@ class WebsocketAdapterManager:
         """
         caller_id = self._subscribe_call_id
         self._subscribe_call_id += 1
-        if connection_requests is None:
-            connection_requests = csp.null_ts(ConnectionRequest)
+        if connection_request is None:
+            connection_request = csp.null_ts(ConnectionRequest)
         elif not self._dynamic:
             raise ValueError("ConnectionRequests must be None when dynamic is False")
 
         dynamic_type = None
         adapter_props = {}
         if self._dynamic:
-            request_dict = self._enrich_with_caller_id(connection_requests, caller_id, is_subscribe=True)
-            # We just declare it here, so it gets included in the graph
-            # since nothing is returned.
+            request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
             adapter_props = {"caller_id": caller_id, "is_subscribe": True}
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.
@@ -574,18 +580,18 @@ class WebsocketAdapterManager:
 
         return _websocket_input_adapter_def(self, true_type, properties, push_mode=push_mode)
 
-    def send(self, x: ts["T"], connection_requests: Optional[ts[ConnectionRequest]] = None):
+    def send(self, x: ts["T"], connection_request: Optional[ts[ConnectionRequest]] = None):
         caller_id = self._send_call_id
         self._send_call_id += 1
         request_dict = {}
 
-        if connection_requests is None:
-            connection_requests = csp.null_ts(ConnectionRequest)
+        if connection_request is None:
+            connection_request = csp.null_ts(ConnectionRequest)
         elif not self._dynamic:
             raise ValueError("ConnectionRequests must be None when dynamic is False")
 
         if self._dynamic:
-            request_dict = self._enrich_with_caller_id(connection_requests, caller_id, is_subscribe=False)
+            request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=False)
             adapter_props = {"caller_id": caller_id, "is_subscribe": False}
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.

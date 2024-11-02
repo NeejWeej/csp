@@ -49,10 +49,9 @@ void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
     // endpoint a response is from.
 };
 
-void ClientAdapterManager::send(const std::string& value, const int64_t& caller_id) {
+void ClientAdapterManager::send(const std::string& value, const size_t& caller_id) {
     // Safety check for caller_id
     if (caller_id >= m_producer_endpoints.size()) {
-        // TODO Something
         return;
     }
 
@@ -67,7 +66,6 @@ void ClientAdapterManager::send(const std::string& value, const int64_t& caller_
             caller_id < m_endpoint_producers[endpoint_id].size() && 
             m_endpoint_producers[endpoint_id][caller_id]) {
             
-            // Post the send operation to the io_context
             boost::asio::post(m_ioc, [endpoint_id, value, ep = it->second.get()]() {
                 ep->send(value);
             });
@@ -77,24 +75,25 @@ void ClientAdapterManager::send(const std::string& value, const int64_t& caller_
 
 void ClientAdapterManager::setupOneOffConnection(const std::string& endpoint_id, const Dictionary& properties) {
     auto caller_id = properties.get<int64_t>("caller_id");
+    size_t validated_id = validateCallerId(caller_id);
     auto is_consumer = properties.get<bool>("is_subscribe");
     auto payload = properties.get<std::string>("on_connect_payload");
     
     // First add them as consumer/producer so the endpoint stays alive 
     if (is_consumer) {
-        addConsumer(endpoint_id, caller_id);
+        addConsumer(endpoint_id, validated_id);
     } else {
-        addProducer(endpoint_id, caller_id);
+        addProducer(endpoint_id, validated_id);
     }
 
     // If endpoint doesn't exist, create it
     if (!m_endpoints.contains(endpoint_id)) {
         auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
         
-        boost::asio::post(m_ioc, [this, endpoint_id, payload, caller_id, is_consumer, 
+        boost::asio::post(m_ioc, [this, endpoint_id, payload, validated_id, is_consumer, 
                           ep = std::move(endpoint)]() mutable {
             // Special onOpen for one-off: send payload and disconnect
-            ep->setOnOpen([this, endpoint_id, payload, caller_id, is_consumer]() {
+            ep->setOnOpen([this, endpoint_id, payload, validated_id, is_consumer]() {
                 auto* endpoint = m_endpoints[endpoint_id].get();
                 
                 // Send the payload
@@ -104,9 +103,9 @@ void ClientAdapterManager::setupOneOffConnection(const std::string& endpoint_id,
                 
                 // Remove them and check if we should close endpoint
                 if (is_consumer) {
-                    removeConsumer(endpoint_id, caller_id);
+                    removeConsumer(endpoint_id, validated_id);
                 } else {
-                    removeProducer(endpoint_id, caller_id);
+                    removeProducer(endpoint_id, validated_id);
                 }
                 
                 if (canRemoveEndpoint(endpoint_id)) {
@@ -140,14 +139,14 @@ void ClientAdapterManager::setupOneOffConnection(const std::string& endpoint_id,
         auto* endpoint = m_endpoints[endpoint_id].get();
         if (!payload.empty()) {
             boost::asio::post(m_ioc, [endpoint, payload, this, endpoint_id, 
-                              caller_id, is_consumer]() {
+                              validated_id, is_consumer]() {
                 endpoint->send(payload);
                 
                 // Remove them and maybe close endpoint
                 if (is_consumer) {
-                    removeConsumer(endpoint_id, caller_id);
+                    removeConsumer(endpoint_id, validated_id);
                 } else {
-                    removeProducer(endpoint_id, caller_id);
+                    removeProducer(endpoint_id, validated_id);
                 }
                 
                 if (canRemoveEndpoint(endpoint_id)) {
@@ -290,7 +289,7 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
 {
     auto endpoint_id = properties.get<std::string>("uri");
     auto caller_id = properties.get<int64_t>("caller_id");
-    std::cout << caller_id << "\n";
+    size_t validated_id = validateCallerId(caller_id);
     autogen::ActionType action = autogen::ActionType::create( properties.get<std::string>("action") );
     auto is_consumer = properties.get<bool>("is_subscribe");
     
@@ -313,16 +312,16 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
                 // Get payload if it exists
                 if (auto payload = properties.get<std::string>("on_connect_payload"); !payload.empty()) {
                     auto& payloads = is_consumer ? config.consumer_payloads : config.producer_payloads;
-                    if (payloads.size() <= caller_id) {
-                        payloads.resize(caller_id + 1);
+                    if (payloads.size() <= validated_id) {
+                        payloads.resize(validated_id + 1);
                     }
-                    payloads[caller_id] = std::move(payload);
+                    payloads[validated_id] = std::move(payload);
                 }
                 
                 if (is_consumer) {
-                    ClientAdapterManager::addConsumer(endpoint_id, caller_id);
+                    ClientAdapterManager::addConsumer(endpoint_id, validated_id);
                 } else {
-                    ClientAdapterManager::addProducer(endpoint_id, caller_id);
+                    ClientAdapterManager::addProducer(endpoint_id, validated_id);
                 }
                 
                 if (is_new_endpoint) {
@@ -337,9 +336,9 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
             // Clear persistence flag for this caller
             if (auto config_it = m_endpoint_configs.find(endpoint_id); config_it != m_endpoint_configs.end()) {
                 if (is_consumer) {
-                    ClientAdapterManager::removeConsumer(endpoint_id, caller_id);
+                    ClientAdapterManager::removeConsumer(endpoint_id, validated_id);
                 } else {
-                    ClientAdapterManager::removeProducer(endpoint_id, caller_id);
+                    ClientAdapterManager::removeProducer(endpoint_id, validated_id);
                 }
                 if (canRemoveEndpoint(endpoint_id)) {
                     shutdownEndpoint(endpoint_id);
@@ -353,8 +352,8 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
             auto& consumers = m_endpoint_consumers[endpoint_id];
             auto& producers = m_endpoint_producers[endpoint_id];
 
-            if ( ( is_consumer && caller_id < consumers.size() && consumers[caller_id] ) || 
-                ( !is_consumer && caller_id < producers.size() && producers[caller_id] ) ) {
+            if ( ( is_consumer && validated_id < consumers.size() && consumers[validated_id] ) || 
+                ( !is_consumer && validated_id < producers.size() && producers[validated_id] ) ) {
                     if (auto it = m_endpoints.find(endpoint_id); it != m_endpoints.end()) {
                         boost::asio::post(m_ioc, [ep = it->second.get()]() {
                             ep->ping();
@@ -376,20 +375,22 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
 //     });
 // }
 
-void ClientAdapterManager::ensureVectorSize(std::vector<bool>& vec, int64_t caller_id) {
+void ClientAdapterManager::ensureVectorSize(std::vector<bool>& vec, size_t caller_id) {
     if (vec.size() <= caller_id) {
         vec.resize(caller_id + 1, false);
     }
 }
 
-void ClientAdapterManager::ensureCallerVectorsSize(int64_t caller_id) {
+void ClientAdapterManager::ensureCallerVectorsSize(size_t caller_id) {
     if (m_consumer_endpoints.size() <= caller_id) {
         m_consumer_endpoints.resize(caller_id + 1);
+    }
+    if (m_producer_endpoints.size() <= caller_id) {
         m_producer_endpoints.resize(caller_id + 1);
     }
 }
 
-void ClientAdapterManager::addConsumer(const std::string& endpoint_id, int64_t caller_id) {
+void ClientAdapterManager::addConsumer(const std::string& endpoint_id, size_t caller_id) {
     ensureVectorSize(m_endpoint_consumers[endpoint_id], caller_id);
     m_endpoint_consumers[endpoint_id][caller_id] = true;
     
@@ -397,7 +398,7 @@ void ClientAdapterManager::addConsumer(const std::string& endpoint_id, int64_t c
     m_consumer_endpoints[caller_id].insert(endpoint_id);
 }
 
-void ClientAdapterManager::addProducer(const std::string& endpoint_id, int64_t caller_id) {
+void ClientAdapterManager::addProducer(const std::string& endpoint_id, size_t caller_id) {
     ensureVectorSize(m_endpoint_producers[endpoint_id], caller_id);
     m_endpoint_producers[endpoint_id][caller_id] = true;
     
@@ -414,7 +415,7 @@ bool ClientAdapterManager::canRemoveEndpoint(const std::string& endpoint_id) {
             std::none_of(producers.begin(), producers.end(), [](bool b) { return b; });
 }
 
-void ClientAdapterManager::removeConsumer(const std::string& endpoint_id, int64_t caller_id) {
+void ClientAdapterManager::removeConsumer(const std::string& endpoint_id, size_t caller_id) {
     auto& consumers = m_endpoint_consumers[endpoint_id];
     if (caller_id < consumers.size()) {
         consumers[caller_id] = false;
@@ -425,7 +426,7 @@ void ClientAdapterManager::removeConsumer(const std::string& endpoint_id, int64_
     }
 }
 
-void ClientAdapterManager::removeProducer(const std::string& endpoint_id, int64_t caller_id) {
+void ClientAdapterManager::removeProducer(const std::string& endpoint_id, size_t caller_id) {
     auto& producers = m_endpoint_producers[endpoint_id];
     if (caller_id < producers.size()) {
         producers[caller_id] = false;
@@ -464,7 +465,6 @@ PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushM
         properties    
     );
     assert(properties.get<bool>("is_subscribe"));
-    assert(m_inputAdapters.size() == properties.get<int64_t>("caller_id"));
     m_inputAdapters.push_back(input_adapter);
     // if (m_inputAdapter == nullptr)
     // {
@@ -481,10 +481,11 @@ PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushM
 OutputAdapter* ClientAdapterManager::getOutputAdapter( const Dictionary & properties )
 {
     auto caller_id = properties.get<int64_t>("caller_id");
+    size_t validated_id = validateCallerId(caller_id);
     assert(!properties.get<bool>("is_subscribe"));
-    assert(m_outputAdapters.size() == caller_id);
+    assert(m_outputAdapters.size() == validated_id);
 
-    auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>(*m_endpoint, this, caller_id, m_ioc);
+    auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>(*m_endpoint, this, validated_id, m_ioc);
     m_outputAdapters.push_back(output_adapter);
     return output_adapter;
 }
@@ -500,13 +501,13 @@ OutputAdapter * ClientAdapterManager::getConnectionRequestAdapter( const Diction
 {
     auto caller_id = properties.get<int64_t>("caller_id");
     auto is_subscribe = properties.get<bool>("is_subscribe");
-    
+    size_t validated_id = validateCallerId(caller_id); 
     // Select the appropriate vector based on is_subscribe flag
     std::vector<std::unordered_set<std::string>>& target = 
         is_subscribe ? m_subscribeFromUri : m_sendToUri;
     
     // If caller_id is beyond current vector size, add new sets until we reach it
-    while (caller_id >= target.size()) {
+    while (validated_id >= target.size()) {
         target.emplace_back(); 
     }
     
@@ -514,7 +515,7 @@ OutputAdapter * ClientAdapterManager::getConnectionRequestAdapter( const Diction
     // std::unordered_set<std::string>& uriSet = target[caller_id];
     
     auto* adapter = m_engine->createOwnedObject<ClientConnectionRequestAdapter>(
-        m_endpoint->getProperties(), caller_id, this, m_ioc
+        m_endpoint->getProperties(), this, m_ioc
     );
     m_connectionRequestAdapters.push_back(adapter);
     

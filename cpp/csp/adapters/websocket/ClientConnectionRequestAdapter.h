@@ -19,7 +19,6 @@ public:
     ClientConnectionRequestAdapter(
         Engine * engine,
         Dictionary& properties,
-        int64_t caller_id,
         ClientAdapterManager * clientAdapterManager,
         net::io_context& ioc
     );
@@ -30,7 +29,6 @@ public:
 
 private:
     [[maybe_unused]] Dictionary& m_properties;
-    [[maybe_unused]] uint64_t m_callerId;  // caller id for associated ticking edge
     [[maybe_unused]] ClientAdapterManager* m_clientAdapterManager;
     [[maybe_unused]] net::io_context& m_ioc;
 

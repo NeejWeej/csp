@@ -6,7 +6,7 @@ ClientOutputAdapter::ClientOutputAdapter(
     Engine * engine,
     WebsocketEndpoint& endpoint,
     ClientAdapterManager * clientAdapterManager,
-    int64_t caller_id,
+    size_t caller_id,
     net::io_context& ioc
 ) : OutputAdapter( engine ), 
     m_endpoint( endpoint ), 

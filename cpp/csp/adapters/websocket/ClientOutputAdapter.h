@@ -20,7 +20,7 @@ public:
         Engine * engine,
         WebsocketEndpoint& endpoint,
         ClientAdapterManager * clientAdapterManager,
-        int64_t caller_id,
+        size_t caller_id,
         net::io_context& ioc
     );
 
@@ -31,7 +31,7 @@ public:
 private:
     [[maybe_unused]] WebsocketEndpoint& m_endpoint;
     ClientAdapterManager* m_clientAdapterManager;
-    int32_t m_callerId;
+    size_t m_callerId;
     net::io_context& m_ioc;
     // std::unordered_map<std::string, std::vector<bool>>& m_endpoint_consumers;
 };
