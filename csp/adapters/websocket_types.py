@@ -46,6 +46,7 @@ class InternalConnectionRequest(ConnectionRequest):
     port: str
     route: str = "/"  # resource shouldn't be an empty string
 
+
 """
 ```markdown
 # WebSocket Interface Requirements

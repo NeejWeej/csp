@@ -61,10 +61,12 @@ def diff_dict(old, new):
 
     return d
 
+
 def _sanitize_port(uri: str, port):
     if port:
         return str(port)
     return "443" if uri.startswith("wss") else "80"
+
 
 class TableManager:
     def __init__(self, tables, delta_updates):
@@ -431,7 +433,9 @@ class WebsocketAdapterManager:
         dynamic: bool = False
             Whether we accept dynamically altering the connections via ConnectionRequest objects.
         """
-        conn_request = ConnectionRequest(uri=uri, action=ActionType.CONNECT, reconnect_interval=reconnect_interval, headers=headers or {})
+        conn_request = ConnectionRequest(
+            uri=uri, action=ActionType.CONNECT, reconnect_interval=reconnect_interval, headers=headers or {}
+        )
         self._properties = self._get_properties(conn_request=conn_request)
         self._dynamic = dynamic
 
@@ -442,7 +446,7 @@ class WebsocketAdapterManager:
 
         # This maps types to their wrapper structs
         self._wrapper_struct_dict = {}
-    
+
     @staticmethod
     def to_internal_connection_request(conn_req: ConnectionRequest) -> InternalConnectionRequest:
         uri = conn_req.uri
@@ -455,11 +459,12 @@ class WebsocketAdapterManager:
         conn_req_dict = ConnectionRequest.to_dict()
         update_dict = dict(
             use_ssl=uri.startswith("wss"),
-            route=resp.path or "/", # resource shouldn't be empty string
+            route=resp.path or "/",  # resource shouldn't be empty string
             host=resp.hostname,
-            port=_sanitize_port(uri, resp.port)
+            port=_sanitize_port(uri, resp.port),
         )
-
+        conn_req_dict.update(update_dict)
+        return InternalConnectionRequest(**conn_req_dict)
 
     def _get_properties(self, conn_request: ConnectionRequest) -> dict:
         uri = conn_request.uri
@@ -536,7 +541,7 @@ class WebsocketAdapterManager:
             adapter_props = {"caller_id": caller_id, "is_subscribe": True}
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.
-            csp.print('req dict', request_dict)
+            csp.print("req dict", request_dict)
             _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
 
             dynamic_type = self._wrapper_struct_dict.get(ts_type)
