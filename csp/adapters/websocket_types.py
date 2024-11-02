@@ -32,9 +32,19 @@ class ConnectionRequest(Struct):
     # Whetehr we maintain the connection
     persistent: bool = True  # Only relevant for Connect requests
     reconnect_interval: timedelta = timedelta(seconds=2)
-    on_connect_payload: str  # message to send on connect
+    on_connect_payload: str = ""  # message to send on connect
     headers: Dict[str, str] = {}
 
+
+# This is only used internally to map ticking edges of
+# ConnectionRequest's to the function call they come from.
+# Not really used yet
+class InternalConnectionRequest(ConnectionRequest):
+    caller_id: int
+    is_subscribe: bool
+    host: str
+    port: str
+    route: str = "/"  # resource shouldn't be an empty string
 
 """
 ```markdown

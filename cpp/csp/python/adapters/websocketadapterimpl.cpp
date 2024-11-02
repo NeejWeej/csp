@@ -46,7 +46,11 @@ static OutputAdapter * create_websocket_output_adapter( csp::AdapterManager * ma
     auto * websocketManager = dynamic_cast<ClientAdapterManager*>( manager );
     if( !websocketManager )
         CSP_THROW( TypeError, "Expected WebsocketClientAdapterManager" );
-    return websocketManager -> getOutputAdapter();
+    PyObject * pyProperties;
+    if( !PyArg_ParseTuple( args, "O!",
+                           &PyDict_Type, &pyProperties ) )
+        CSP_THROW( PythonPassthrough, "" );
+    return websocketManager -> getOutputAdapter(fromPython<Dictionary>( pyProperties ));
 }
 
 static OutputAdapter * create_websocket_header_update_adapter( csp::AdapterManager * manager, PyEngine * pyengine, PyObject * args )
@@ -59,7 +63,7 @@ static OutputAdapter * create_websocket_header_update_adapter( csp::AdapterManag
 
 static OutputAdapter * create_websocket_connection_request_adapter( csp::AdapterManager * manager, PyEngine * pyengine, PyObject * args )
 {
-    std::cout << "hereeeee33ee" << "\n";
+    // std::cout << "hereeeee33ee" << "\n";
     PyObject * pyProperties;
     // PyObject * type;
     auto * websocketManager = dynamic_cast<ClientAdapterManager*>( manager );
@@ -69,7 +73,7 @@ static OutputAdapter * create_websocket_connection_request_adapter( csp::Adapter
     if( !PyArg_ParseTuple( args, "O!",
                            &PyDict_Type, &pyProperties ) )
         CSP_THROW( PythonPassthrough, "" );
-    std::cout << "hereeeee334444ee" << "\n";
+    // std::cout << "hereeeee334444ee" << "\n";
     return websocketManager -> getConnectionRequestAdapter( fromPython<Dictionary>( pyProperties ) );
 
 

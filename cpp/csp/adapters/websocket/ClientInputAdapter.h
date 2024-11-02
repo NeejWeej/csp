@@ -26,6 +26,7 @@ public:
 private:
     adapters::utils::MessageStructConverterPtr m_converter;
     bool m_dynamic;  // whether we are in dynamic mode
+    int32_t m_callerId;
 
 };
 

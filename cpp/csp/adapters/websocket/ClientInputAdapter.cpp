@@ -8,7 +8,7 @@ ClientInputAdapter::ClientInputAdapter(
     CspTypePtr & type,
     PushMode pushMode,
     const Dictionary & properties
-) : PushInputAdapter(engine, type, pushMode)
+) : PushInputAdapter(engine, type, pushMode), m_callerId( properties.get<int64_t>("caller_id") )
 {
     if( type -> type() != CspType::Type::STRUCT &&
         type -> type() != CspType::Type::STRING )

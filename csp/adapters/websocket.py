@@ -21,7 +21,7 @@ from csp.impl.wiring import input_adapter_def, output_adapter_def, status_adapte
 from csp.impl.wiring.delayed_node import DelayedNodeWrapperDef
 from csp.lib import _websocketadapterimpl
 
-from .websocket_types import ConnectionRequest, WebsocketHeaderUpdate
+from .websocket_types import ActionType, ConnectionRequest, InternalConnectionRequest, WebsocketHeaderUpdate
 
 _ = (
     BytesMessageProtoMapper,
@@ -61,6 +61,10 @@ def diff_dict(old, new):
 
     return d
 
+def _sanitize_port(uri: str, port):
+    if port:
+        return str(port)
+    return "443" if uri.startswith("wss") else "80"
 
 class TableManager:
     def __init__(self, tables, delta_updates):
@@ -427,7 +431,7 @@ class WebsocketAdapterManager:
         dynamic: bool = False
             Whether we accept dynamically altering the connections via ConnectionRequest objects.
         """
-        conn_request = ConnectionRequest(uri=uri, reconnect_interval=reconnect_interval, headers=headers or {})
+        conn_request = ConnectionRequest(uri=uri, action=ActionType.CONNECT, reconnect_interval=reconnect_interval, headers=headers or {})
         self._properties = self._get_properties(conn_request=conn_request)
         self._dynamic = dynamic
 
@@ -438,6 +442,24 @@ class WebsocketAdapterManager:
 
         # This maps types to their wrapper structs
         self._wrapper_struct_dict = {}
+    
+    @staticmethod
+    def to_internal_connection_request(conn_req: ConnectionRequest) -> InternalConnectionRequest:
+        uri = conn_req.uri
+        reconnect_interval = conn_req.reconnect_interval
+        resp = urllib.parse.urlparse(uri)
+        if resp.hostname is None:
+            raise ValueError(f"Failed to parse host from URI: {uri}")
+
+        assert reconnect_interval >= timedelta(seconds=1)
+        conn_req_dict = ConnectionRequest.to_dict()
+        update_dict = dict(
+            use_ssl=uri.startswith("wss"),
+            route=resp.path or "/", # resource shouldn't be empty string
+            host=resp.hostname,
+            port=_sanitize_port(uri, resp.port)
+        )
+
 
     def _get_properties(self, conn_request: ConnectionRequest) -> dict:
         uri = conn_request.uri
@@ -451,22 +473,21 @@ class WebsocketAdapterManager:
         res = dict(
             host=resp.hostname,
             # if no port is explicitly present in the uri, the resp.port is None
-            port=self._sanitize_port(uri, resp.port),
+            port=_sanitize_port(uri, resp.port),
             route=resp.path or "/",  # resource shouldn't be empty string
             use_ssl=uri.startswith("wss"),
             reconnect_interval=reconnect_interval,
             headers=conn_request.headers,
             persistent=conn_request.persistent,
+            action=conn_request.action.name,
+            on_connect_payload=getattr(conn_request, "on_connect_payload", ""),
+            uri=uri,
         )
-        if action := getattr(conn_request, "action", None):
-            res["action"] = action
+
+        # if action := getattr(conn_request, "action", None):
+        #     res["action"] = action
         # TODO: ADD on_connect_payload option
         return res
-
-    def _sanitize_port(self, uri: str, port):
-        if port:
-            return str(port)
-        return "443" if uri.startswith("wss") else "80"
 
     @csp.node
     def _enrich_with_caller_id(
@@ -490,8 +511,9 @@ class WebsocketAdapterManager:
         push_mode: csp.PushMode = csp.PushMode.NON_COLLAPSING,
         connection_requests: Optional[ts[List[ConnectionRequest]]] = None,
     ):
-        """If dynamic is True, this will tick a tuple, with
-        (url,message)
+        """If dynamic is True, this will tick a custom WrapperStruct,
+        with 'raw_msg' as the correct type of the message.
+        And 'uri' that specifies the 'uri' the message comes from.
 
         Otherwise, returns just message.
 
@@ -506,6 +528,7 @@ class WebsocketAdapterManager:
             raise ValueError("ConnectionRequests must be None when dynamic is False")
 
         dynamic_type = None
+        adapter_props = {}
         if self._dynamic:
             request_dict = self._enrich_with_caller_id(connection_requests, caller_id, is_subscribe=True)
             # We just declare it here, so it gets included in the graph
@@ -513,6 +536,7 @@ class WebsocketAdapterManager:
             adapter_props = {"caller_id": caller_id, "is_subscribe": True}
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.
+            csp.print('req dict', request_dict)
             _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
 
             dynamic_type = self._wrapper_struct_dict.get(ts_type)
@@ -539,6 +563,8 @@ class WebsocketAdapterManager:
         properties["meta_field_map"] = meta_field_map
         properties["dynamic"] = self._dynamic
 
+        properties.update(adapter_props)
+
         true_type = dynamic_type if self._dynamic else ts_type
 
         return _websocket_input_adapter_def(self, true_type, properties, push_mode=push_mode)
@@ -546,6 +572,7 @@ class WebsocketAdapterManager:
     def send(self, x: ts["T"], connection_requests: Optional[ts[ConnectionRequest]] = None):
         caller_id = self._send_call_id
         self._send_call_id += 1
+        request_dict = {}
 
         if connection_requests is None:
             connection_requests = csp.null_ts(ConnectionRequest)
@@ -559,7 +586,7 @@ class WebsocketAdapterManager:
             # since nothing is returned.
             _websocket_connection_request_adapter_def(self, adapter_props, request_dict)
 
-        return _websocket_output_adapter_def(self, x)
+        return _websocket_output_adapter_def(self, x, request_dict)
 
     def update_headers(self, x: ts[List[WebsocketHeaderUpdate]]):
         if self._dynamic:
@@ -596,6 +623,7 @@ _websocket_header_update_adapter_def = output_adapter_def(
     _websocketadapterimpl._websocket_header_update_adapter,
     WebsocketAdapterManager,
     input=ts[List[WebsocketHeaderUpdate]],
+    properties=dict,
 )
 
 _websocket_connection_request_adapter_def = output_adapter_def(

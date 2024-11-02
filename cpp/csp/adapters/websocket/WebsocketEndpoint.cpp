@@ -65,6 +65,7 @@ csp::Dictionary& WebsocketEndpoint::getProperties() {
 
 void WebsocketEndpoint::send(const std::string& s)
 { if(m_session) m_session->send(s); }
-
+void WebsocketEndpoint::ping()
+{ if(m_session) m_session->ping(); }
 
 }

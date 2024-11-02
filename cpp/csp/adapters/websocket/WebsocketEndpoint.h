@@ -5,6 +5,7 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/error.hpp>
 
 #include <csp/engine/Dictionary.h>
 #include <csp/core/Exception.h>
@@ -31,6 +32,7 @@ using void_cb = std::function<void()>;
 class BaseWebsocketSession {
 public:
     virtual void stop() { };
+    virtual void ping() { };
     virtual void send( const std::string& ) { };
     virtual void do_read() { };
     virtual void do_write(const std::string& ) { };
@@ -86,6 +88,13 @@ public:
             [ this ]( beast::error_code ec, std::size_t bytes_transfered )
             { handle_message( ec, bytes_transfered ); }
         );
+    }
+
+    void ping() override {
+        derived().ws().async_ping({},
+            [](beast::error_code ec) {
+                if(ec) CSP_THROW(RuntimeException, ec.message());
+            });
     }
 
     void stop() override 
@@ -352,6 +361,7 @@ public:
     void run();
     void stop();
     void send(const std::string& s);
+    void ping();
 
 private:
     Dictionary m_properties;

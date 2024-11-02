@@ -11,13 +11,15 @@ namespace csp::adapters::websocket
 {
 using namespace csp::autogen;
 
+class ClientAdapterManager;
+
 class ClientConnectionRequestAdapter final: public OutputAdapter
 {
 public:
     ClientConnectionRequestAdapter(
         Engine * engine,
         Dictionary& properties,
-        uint64_t caller_id,
+        int64_t caller_id,
         ClientAdapterManager * clientAdapterManager,
         net::io_context& ioc
     );
