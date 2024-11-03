@@ -1,6 +1,5 @@
 #include <csp/adapters/websocket/ClientConnectionRequestAdapter.h>
 #include <csp/python/Conversions.h>
-#include <iostream>
 #include <Python.h>
 
 namespace csp::adapters::websocket {

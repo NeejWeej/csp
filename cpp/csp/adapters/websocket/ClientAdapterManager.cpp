@@ -1,5 +1,4 @@
 #include <csp/adapters/websocket/ClientAdapterManager.h>
-#include <boost/system/error_code.hpp>
 #include <iostream>
 
 namespace csp {
@@ -297,7 +296,7 @@ void ClientAdapterManager::handleEndpointFailure(const std::string& endpoint_id,
             
             // Schedule reconnection attempt
             config.reconnect_timer->expires_after(config.reconnect_interval);
-            config.reconnect_timer->async_wait([this, endpoint_id](const boost::system::error_code& ec) {
+            config.reconnect_timer->async_wait([this, endpoint_id](const error_code& ec) {
                 boost::asio::post(m_ioc, [this, endpoint_id]() {
                     if (auto it = m_endpoints.find(endpoint_id); 
                         it != m_endpoints.end()) {

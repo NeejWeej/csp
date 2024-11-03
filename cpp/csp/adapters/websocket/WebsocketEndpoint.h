@@ -6,6 +6,7 @@
 #include <boost/beast/websocket.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/error.hpp>
+#include <boost/system/error_code.hpp>
 
 #include <csp/engine/Dictionary.h>
 #include <csp/core/Exception.h>
@@ -24,6 +25,7 @@ namespace net = boost::asio;            // from <boost/asio.hpp>
 namespace ssl = boost::asio::ssl;       // from <boost/asio/ssl.hpp>
 namespace websocket = beast::websocket; // from <boost/beast/websocket.hpp>
 using tcp = boost::asio::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
+using error_code = boost::system::error_code; //from <boost/system/error_code.hpp>
 
 using string_cb = std::function<void(const std::string&)>;
 using char_cb = std::function<void(void*, size_t)>;
