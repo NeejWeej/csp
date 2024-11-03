@@ -1,11 +1,11 @@
 #ifndef _IN_CSP_ADAPTERS_WEBSOCKETS_CLIENT_CONNECTIONREQUESTADAPTER_H
 #define _IN_CSP_ADAPTERS_WEBSOCKETS_CLIENT_CONNECTIONREQUESTADAPTER_H
 
+#include <csp/adapters/websocket/ClientAdapterManager.h>  // CAN I DO THIS??
 #include <csp/engine/Dictionary.h>
 #include <csp/engine/OutputAdapter.h>
 #include <csp/adapters/utils/MessageWriter.h>
 #include <csp/adapters/websocket/csp_autogen/websocket_types.h>
-#include <csp/adapters/websocket/ClientAdapterManager.h>  // CAN I DO THIS??
 
 namespace csp::adapters::websocket
 {
