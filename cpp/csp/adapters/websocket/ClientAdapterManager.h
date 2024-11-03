@@ -159,6 +159,7 @@ private:
     std::unordered_map<std::string, EndpointConfig> m_endpoint_configs;
     std::vector<ClientInputAdapter*> m_inputAdapters;
     std::vector<ClientOutputAdapter*> m_outputAdapters;
+    bool m_dynamic;
 };
 
 }

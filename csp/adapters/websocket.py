@@ -422,7 +422,7 @@ class WebsocketAdapterManager:
         self,
         uri: Optional[str] = None,
         reconnect_interval: timedelta = timedelta(seconds=2),
-        headers: Dict[str, str] = None,
+        headers: Optional[Dict[str, str]] = None,
         dynamic: bool = False,
         connection_request: Optional[ConnectionRequest] = None,
     ):
@@ -443,8 +443,8 @@ class WebsocketAdapterManager:
         elif uri is not None:
             raise ValueError("'connection_request' cannot be set along with 'uri'")
 
-        self._properties = self._get_properties(conn_request=connection_request)
         self._dynamic = dynamic
+        self._properties = self._get_properties(conn_request=connection_request)
 
         # This is a counter that will be used to identify every function call
         # We keep track of the subscribes and sends separately
@@ -495,6 +495,7 @@ class WebsocketAdapterManager:
             action=conn_request.action.name,
             on_connect_payload=getattr(conn_request, "on_connect_payload", ""),
             uri=uri,
+            dynamic=self._dynamic,
         )
 
         # if action := getattr(conn_request, "action", None):
@@ -541,10 +542,10 @@ class WebsocketAdapterManager:
             raise ValueError("ConnectionRequests must be None when dynamic is False")
 
         dynamic_type = None
-        adapter_props = {}
+        # Only relevant for dynamic mode
+        adapter_props = {"caller_id": caller_id, "is_subscribe": True, "dynamic": self._dynamic}
         if self._dynamic:
             request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
-            adapter_props = {"caller_id": caller_id, "is_subscribe": True}
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.
             csp.print("req dict", request_dict)
@@ -572,7 +573,6 @@ class WebsocketAdapterManager:
         properties = msg_mapper.properties.copy()
         properties["field_map"] = field_map
         properties["meta_field_map"] = meta_field_map
-        properties["dynamic"] = self._dynamic
 
         properties.update(adapter_props)
 
@@ -590,16 +590,19 @@ class WebsocketAdapterManager:
         elif not self._dynamic:
             raise ValueError("ConnectionRequests must be None when dynamic is False")
 
+        adapter_props = {"caller_id": caller_id, "is_subscribe": False, "dynamic": self._dynamic}
         if self._dynamic:
             request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=False)
-            adapter_props = {"caller_id": caller_id, "is_subscribe": False}
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.
             _websocket_connection_request_adapter_def(self, adapter_props, request_dict)
 
-        return _websocket_output_adapter_def(self, x, request_dict)
+        return _websocket_output_adapter_def(self, x, adapter_props)
 
     def update_headers(self, x: ts[List[WebsocketHeaderUpdate]]):
+        # TODO Right now, not sure how to handle updated headers in dynamic mode
+        # Should the endpoint just get updated, or should a new endpoint be made?
+        # The latter makes things annoying. Right now, it's just dropped.
         if self._dynamic:
             raise ValueError("If dynamic, cannot call update_headers")
         return _websocket_header_update_adapter_def(self, x)
@@ -627,6 +630,7 @@ _websocket_output_adapter_def = output_adapter_def(
     _websocketadapterimpl._websocket_output_adapter,
     WebsocketAdapterManager,
     input=ts["T"],
+    properties=dict,
 )
 
 _websocket_header_update_adapter_def = output_adapter_def(

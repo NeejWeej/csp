@@ -28,25 +28,74 @@ ClientAdapterManager::ClientAdapterManager( Engine* engine, const Dictionary & p
     m_updateAdapter( nullptr ),
     m_thread( nullptr ), 
     m_properties( properties ),
-    m_work_guard(boost::asio::make_work_guard(m_ioc))
+    m_work_guard(boost::asio::make_work_guard(m_ioc)),
+    m_dynamic( properties.get<bool>("dynamic") )
 { };
 
 ClientAdapterManager::~ClientAdapterManager()
 { };
 
 void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
-        AdapterManager::start(starttime, endtime);
-        // m_shouldRun = true;
-        std::cout << "WE START" << "\n";
-        // Just run the io_context in the thread
+    AdapterManager::start(starttime, endtime);
+    if( m_dynamic ){
         m_thread = std::make_unique<std::thread>([this]() {
             m_ioc.run();
         });
-    // this is where we do the updates and manage the endpoints
-    // We should consider all the different possibilities
-    // Also, if dynamic, we need the input adapter to return
-    // A wrapped object, or something to signify which
-    // endpoint a response is from.
+    }
+    else {
+        m_shouldRun = true;
+        m_endpoint -> setOnOpen(
+            [ this ]() {
+                m_active = true;
+                pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully" );
+            }
+        );
+        m_endpoint -> setOnFail(
+            [ this ]( const std::string& reason ) {
+                std::stringstream ss;
+                ss << "Connection Failure: " << reason;
+                m_active = false;
+                pushStatus( StatusLevel::ERROR, ClientStatusType::CONNECTION_FAILED, ss.str() );
+            } 
+        );
+        if( m_inputAdapter ) {
+            m_endpoint -> setOnMessage(
+                [ this ]( void* c, size_t t ) {
+                    std::cout << "YUR";
+                    PushBatch batch( m_engine -> rootEngine() );
+                    m_inputAdapter -> processMessage( c, t, &batch );
+                }
+            );
+        } else {
+            // if a user doesn't call WebsocketAdapterManager.subscribe, no inputadapter will be created
+            // but we still need something to avoid on_message_cb not being set in the endpoint.
+            m_endpoint -> setOnMessage( []( void* c, size_t t ){} );
+        }
+        m_endpoint -> setOnClose(
+            [ this ]() {
+                m_active = false;
+                pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
+            }
+        );
+        m_endpoint -> setOnSendFail(
+            [ this ]( const std::string& s ) {
+                std::stringstream ss;
+                ss << "Failed to send: " << s;
+                pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() );
+            }
+        );
+
+        m_thread = std::make_unique<std::thread>( [ this ]() { 
+            while( m_shouldRun )
+            {
+                std::cout << "WE ARE RUNNING\n"; 
+                m_endpoint -> run();
+                std::cout << "WE ARE NOT RUNNING\n"; 
+                m_active = false;
+                if( m_shouldRun ) sleep( m_properties.get<TimeDelta>( "reconnect_interval" ) );
+            }
+        });
+    }
 };
 
 void ClientAdapterManager::send(const std::string& value, const size_t& caller_id) {
@@ -179,7 +228,6 @@ void ClientAdapterManager::shutdownEndpoint(const std::string& endpoint_id) {
 
 void ClientAdapterManager::setupEndpoint(const std::string& endpoint_id, 
                                        std::unique_ptr<WebsocketEndpoint>& endpoint) {
-    std::cout << "WE ARE SETTING UPA NEW EDNPOINT HERE " << "\n";
     boost::asio::post(m_ioc, [this, endpoint_id, ep = std::move(endpoint)]() mutable {
         ep->setOnOpen([this, endpoint_id]() {
             auto [iter, inserted] = m_endpoint_configs.try_emplace(endpoint_id, m_ioc);
@@ -440,54 +488,62 @@ void ClientAdapterManager::removeProducer(const std::string& endpoint_id, size_t
 
 void ClientAdapterManager::stop() {
     AdapterManager::stop();
-
-    // m_shouldRun=false; 
-    
-    // Stop the work guard to allow the io_context to complete
-    m_work_guard.reset();
-    
-    // Stop all endpoints
-    for (auto& [endpoint_id, _] : m_endpoints) {
-        shutdownEndpoint(endpoint_id);
-        // endpoint->stop();
+    if( m_dynamic ){
+        // Stop the work guard to allow the io_context to complete
+        m_work_guard.reset();
+        
+        // Stop all endpoints
+        for (auto& [endpoint_id, _] : m_endpoints) {
+            shutdownEndpoint(endpoint_id);
+            // endpoint->stop();
+        }
     }
-    
-    // if( m_active ) m_endpoint->stop();
+    else{
+        m_shouldRun=false; 
+        if( m_active ) m_endpoint->stop();
+    }
     if( m_thread ) m_thread->join();
 };
 
 PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushMode pushMode, const Dictionary & properties)
 {   
-    auto input_adapter = m_engine -> createOwnedObject<ClientInputAdapter>(
-        // m_engine,
-        type,
-        pushMode,
-        properties    
-    );
-    assert(properties.get<bool>("is_subscribe"));
-    m_inputAdapters.push_back(input_adapter);
-    // if (m_inputAdapter == nullptr)
-    // {
-    //     m_inputAdapter = m_engine -> createOwnedObject<ClientInputAdapter>(
-    //         // m_engine,
-    //         type,
-    //         pushMode,
-    //         properties    
-    //     );
-    // }
-    return input_adapter;
+    if ( m_dynamic ){
+        auto input_adapter = m_engine -> createOwnedObject<ClientInputAdapter>(
+            // m_engine,
+            type,
+            pushMode,
+            properties    
+        );
+        m_inputAdapters.push_back(input_adapter);
+        return input_adapter;
+    }
+    if (m_inputAdapter == nullptr)
+    {
+        m_inputAdapter = m_engine -> createOwnedObject<ClientInputAdapter>(
+            // m_engine,
+            type,
+            pushMode,
+            properties    
+        );
+    }
+    return m_inputAdapter;
 };
 
 OutputAdapter* ClientAdapterManager::getOutputAdapter( const Dictionary & properties )
 {
-    auto caller_id = properties.get<int64_t>("caller_id");
-    size_t validated_id = validateCallerId(caller_id);
-    assert(!properties.get<bool>("is_subscribe"));
-    assert(m_outputAdapters.size() == validated_id);
+    if ( m_dynamic ){
+        auto caller_id = properties.get<int64_t>("caller_id");
+        size_t validated_id = validateCallerId(caller_id);
+        assert(!properties.get<bool>("is_subscribe"));
+        assert(m_outputAdapters.size() == validated_id);
 
-    auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>(*m_endpoint, this, validated_id, m_ioc);
-    m_outputAdapters.push_back(output_adapter);
-    return output_adapter;
+        auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>( *m_endpoint, this, validated_id, m_ioc, m_dynamic );
+        m_outputAdapters.push_back(output_adapter);
+        return output_adapter;
+    }
+    // validated_id does not matter here
+    if (m_outputAdapter == nullptr) m_outputAdapter = m_engine -> createOwnedObject<ClientOutputAdapter>( *m_endpoint, this, 0, m_ioc, m_dynamic );
+    return m_outputAdapter;
 }
 
 OutputAdapter * ClientAdapterManager::getHeaderUpdateAdapter()

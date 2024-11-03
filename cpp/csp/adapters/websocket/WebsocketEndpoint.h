@@ -367,6 +367,7 @@ private:
     Dictionary m_properties;
     BaseWebsocketSession* m_session;
     net::io_context& m_ioc;
+    net::io_context m_owned_ioc;
     void_cb m_on_open;
     string_cb m_on_fail;
     char_cb m_on_message;
