@@ -106,7 +106,7 @@ public:
     PushInputAdapter * getInputAdapter( CspTypePtr & type, PushMode pushMode, const Dictionary & properties );
     OutputAdapter * getOutputAdapter( const Dictionary & properties );
     OutputAdapter * getHeaderUpdateAdapter();
-    OutputAdapter * getConnectionRequestAdapter(const Dictionary & properties);
+    OutputAdapter * getConnectionRequestAdapter( const Dictionary & properties );
 
     DateTime processNextSimTimeSlice( DateTime time ) override;
 
@@ -124,6 +124,7 @@ private:
     // We use this information to keep track of how to route messages to/from
     // uri's, and when a uri connection can be closed.
     using UriInfo = std::tuple<int32_t, std::unordered_set<uint64_t>>; //TODO remove
+    using OptWorkGuard = std::optional<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>;
     net::io_context m_ioc;
     [[maybe_unused]] bool m_active;
     [[maybe_unused]] bool m_shouldRun;
@@ -153,7 +154,7 @@ private:
     // Quick lookup for caller's endpoints
     std::vector< std::unordered_set<std::string> > m_consumer_endpoints;  // caller_id -> set of endpoints they consume from
     std::vector< std::unordered_set<std::string> > m_producer_endpoints;  // caller_id -> set of endpoints they produce to
-    boost::asio::executor_work_guard<boost::asio::io_context::executor_type> m_work_guard;
+    OptWorkGuard m_work_guard;
     std::unordered_map<std::string, std::unique_ptr<WebsocketEndpoint>> m_endpoints;
     std::unordered_map<std::string, ConnectPayloads> m_connect_payloads;
     std::unordered_map<std::string, EndpointConfig> m_endpoint_configs;

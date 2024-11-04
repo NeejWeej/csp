@@ -23,17 +23,13 @@ void WebsocketEndpoint::setOnSendFail(string_cb on_send_fail)
 void WebsocketEndpoint::run()
 {
     // Owns this ioc object
-    auto& ioc_to_use = m_properties.get<bool>("dynamic") ? m_ioc : m_owned_ioc;
-
-    if ( !m_properties.get<bool>("dynamic") )
-        ioc_to_use.reset();
     if(m_properties.get<bool>("use_ssl")) {
         ssl::context ctx{ssl::context::sslv23};
         ctx.set_verify_mode(ssl::context::verify_peer );
         ctx.set_default_verify_paths();
 
         m_session = new WebsocketSessionTLS(
-            ioc_to_use,
+            m_ioc,
             ctx,
             &m_properties,
             m_on_open, 
@@ -44,7 +40,7 @@ void WebsocketEndpoint::run()
         );
     } else {
         m_session = new WebsocketSessionNoTLS(
-            ioc_to_use, 
+            m_ioc, 
             &m_properties,
             m_on_open, 
             m_on_fail, 
@@ -54,14 +50,12 @@ void WebsocketEndpoint::run()
         );
     }
     m_session->run();
-    // Owns this ioc object
-    if ( !m_properties.get<bool>("dynamic") )
-        ioc_to_use.run();
 }
 
-void WebsocketEndpoint::stop()
-{ 
-    m_ioc.stop();
+void WebsocketEndpoint::stop( bool stop_ioc )
+{
+    if( stop_ioc ) 
+        m_ioc.stop();
     if(m_session) m_session->stop(); 
 }
 

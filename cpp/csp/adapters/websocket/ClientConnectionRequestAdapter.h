@@ -18,7 +18,6 @@ class ClientConnectionRequestAdapter final: public OutputAdapter
 public:
     ClientConnectionRequestAdapter(
         Engine * engine,
-        Dictionary& properties,
         ClientAdapterManager * clientAdapterManager,
         net::io_context& ioc
     );
@@ -28,7 +27,6 @@ public:
     const char * name() const override { return "WebsocketClientConnectionRequestAdapter"; }
 
 private:
-    [[maybe_unused]] Dictionary& m_properties;
     [[maybe_unused]] ClientAdapterManager* m_clientAdapterManager;
     [[maybe_unused]] net::io_context& m_ioc;
 

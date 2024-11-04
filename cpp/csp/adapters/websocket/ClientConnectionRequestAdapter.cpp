@@ -6,11 +6,9 @@ namespace csp::adapters::websocket {
 
 ClientConnectionRequestAdapter::ClientConnectionRequestAdapter(
     Engine * engine,
-    Dictionary& properties,
     ClientAdapterManager * clientAdapterManager,
     net::io_context& ioc
-) : OutputAdapter( engine ), 
-    m_properties( properties ), 
+) : OutputAdapter( engine ),  
     m_clientAdapterManager( clientAdapterManager ),
     m_ioc( ioc) 
 { };

@@ -27,7 +27,9 @@ ClientAdapterManager::ClientAdapterManager( Engine* engine, const Dictionary & p
     m_updateAdapter( nullptr ),
     m_thread( nullptr ), 
     m_properties( properties ),
-    m_work_guard(boost::asio::make_work_guard(m_ioc)),
+    m_work_guard(properties.get<bool>("dynamic") ? 
+        std::make_optional(boost::asio::make_work_guard(m_ioc)) : 
+        std::nullopt),
     m_dynamic( properties.get<bool>("dynamic") )
 { };
 
@@ -37,11 +39,17 @@ ClientAdapterManager::~ClientAdapterManager()
 void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
     AdapterManager::start(starttime, endtime);
     if( m_dynamic ){
+        // maybe restart here?
+        m_shouldRun = true;
         m_thread = std::make_unique<std::thread>([this]() {
+            m_ioc.reset();
             m_ioc.run();
         });
     }
     else {
+        // Don't use a work guard here
+        // TODO maybe use a work guard here
+        // m_work_guard.reset();
         m_shouldRun = true;
         m_endpoint -> setOnOpen(
             [ this ]() {
@@ -60,7 +68,6 @@ void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
         if( m_inputAdapter ) {
             m_endpoint -> setOnMessage(
                 [ this ]( void* c, size_t t ) {
-                    std::cout << "YUR";
                     PushBatch batch( m_engine -> rootEngine() );
                     m_inputAdapter -> processMessage( c, t, &batch );
                 }
@@ -73,6 +80,7 @@ void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
         m_endpoint -> setOnClose(
             [ this ]() {
                 m_active = false;
+                std::cout << "We must surely be here\n";
                 pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
             }
         );
@@ -87,10 +95,10 @@ void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
         m_thread = std::make_unique<std::thread>( [ this ]() { 
             while( m_shouldRun )
             {
-                std::cout << "WE ARE RUNNING\n"; 
                 m_endpoint -> run();
-                std::cout << "WE ARE NOT RUNNING\n"; 
+                m_ioc.run();
                 m_active = false;
+                m_ioc.reset();
                 if( m_shouldRun ) sleep( m_properties.get<TimeDelta>( "reconnect_interval" ) );
             }
         });
@@ -219,7 +227,7 @@ void ClientAdapterManager::shutdownEndpoint(const std::string& endpoint_id) {
         // Stop and remove the endpoint
         if (auto endpoint_it = m_endpoints.find(endpoint_id); 
             endpoint_it != m_endpoints.end()) {
-            endpoint_it->second->stop();
+            endpoint_it->second->stop( false );
             m_endpoints.erase(endpoint_it);
         }
     });
@@ -413,15 +421,6 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
 }
 
 
-// void ClientAdapterManager::removeEndpoint(const std::string& id) {
-//     asio::post(m_ioc, [this, id]() {
-//         if (auto it = m_endpoints.find(id); it != m_endpoints.end()) {
-//             it->second->stop();
-//             m_endpoints.erase(it);
-//         }
-//     });
-// }
-
 void ClientAdapterManager::ensureVectorSize(std::vector<bool>& vec, size_t caller_id) {
     if (vec.size() <= caller_id) {
         vec.resize(caller_id + 1, false);
@@ -487,9 +486,11 @@ void ClientAdapterManager::removeProducer(const std::string& endpoint_id, size_t
 
 void ClientAdapterManager::stop() {
     AdapterManager::stop();
+    m_shouldRun=false;
     if( m_dynamic ){
         // Stop the work guard to allow the io_context to complete
-        m_work_guard.reset();
+        if (m_work_guard )
+            m_work_guard.reset();
         
         // Stop all endpoints
         for (auto& [endpoint_id, _] : m_endpoints) {
@@ -498,9 +499,9 @@ void ClientAdapterManager::stop() {
         }
     }
     else{
-        m_shouldRun=false; 
-        if( m_active ) m_endpoint->stop();
+        if( m_active ) m_endpoint->stop( false );
     }
+    m_ioc.stop();
     if( m_thread ) m_thread->join();
 };
 
@@ -552,6 +553,7 @@ OutputAdapter * ClientAdapterManager::getHeaderUpdateAdapter()
     return m_updateAdapter;
 }
 
+// TODO Maybe make this const?
 OutputAdapter * ClientAdapterManager::getConnectionRequestAdapter( const Dictionary & properties )
 {
     auto caller_id = properties.get<int64_t>("caller_id");
@@ -570,7 +572,7 @@ OutputAdapter * ClientAdapterManager::getConnectionRequestAdapter( const Diction
     // std::unordered_set<std::string>& uriSet = target[caller_id];
     
     auto* adapter = m_engine->createOwnedObject<ClientConnectionRequestAdapter>(
-        m_endpoint->getProperties(), this, m_ioc
+        this, m_ioc
     );
     m_connectionRequestAdapters.push_back(adapter);
     
