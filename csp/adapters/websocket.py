@@ -21,7 +21,7 @@ from csp.impl.wiring import input_adapter_def, output_adapter_def, status_adapte
 from csp.impl.wiring.delayed_node import DelayedNodeWrapperDef
 from csp.lib import _websocketadapterimpl
 
-from .websocket_types import ActionType, ConnectionRequest, WebsocketHeaderUpdate
+from .websocket_types import ConnectionRequest, WebsocketHeaderUpdate
 
 # InternalConnectionRequest,
 
@@ -425,6 +425,7 @@ class WebsocketAdapterManager:
         headers: Optional[Dict[str, str]] = None,
         dynamic: bool = False,
         connection_request: Optional[ConnectionRequest] = None,
+        num_threads: int = 1,
     ):
         """
         uri: str
@@ -435,16 +436,22 @@ class WebsocketAdapterManager:
             headers to apply to the request during the handshake
         dynamic: bool = False
             Whether we accept dynamically altering the connections via ConnectionRequest objects.
+        num_threads: int = 1
+            If in dynamic mode, determines number of threads to allocate for thread pool handling websocket endpoints.
         """
-        if connection_request is None:
-            connection_request = ConnectionRequest(
-                uri=uri, action=ActionType.CONNECT, reconnect_interval=reconnect_interval, headers=headers or {}
-            )
-        elif uri is not None:
+
+        self._properties = dict(dynamic=dynamic, num_threads=num_threads)
+        # Enumerating for clarity
+        if connection_request is not None and uri is not None:
             raise ValueError("'connection_request' cannot be set along with 'uri'")
 
-        self._dynamic = dynamic
-        self._properties = self._get_properties(conn_request=connection_request)
+        # Exactly 1 of connection_request and uri is None
+        if connection_request is not None or uri is not None:
+            if connection_request is None:
+                connection_request = ConnectionRequest(
+                    uri=uri, reconnect_interval=reconnect_interval, headers=headers or {}
+                )
+            self._properties.update(self._get_properties(connection_request))
 
         # This is a counter that will be used to identify every function call
         # We keep track of the subscribes and sends separately
@@ -453,6 +460,10 @@ class WebsocketAdapterManager:
 
         # This maps types to their wrapper structs
         self._wrapper_struct_dict = {}
+
+    @property
+    def _dynamic(self):
+        return self._properties.get("dynamic", False)
 
     # @staticmethod
     # def to_internal_connection_request(conn_req: ConnectionRequest) -> InternalConnectionRequest:
@@ -595,7 +606,7 @@ class WebsocketAdapterManager:
             request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=False)
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.
-            _websocket_connection_request_adapter_def(self, adapter_props, request_dict)
+            _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
 
         return _websocket_output_adapter_def(self, x, adapter_props)
 

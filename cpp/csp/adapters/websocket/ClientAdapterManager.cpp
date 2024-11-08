@@ -234,61 +234,64 @@ void ClientAdapterManager::shutdownEndpoint(const std::string& endpoint_id) {
 }
 
 void ClientAdapterManager::setupEndpoint(const std::string& endpoint_id, 
-                                       std::unique_ptr<WebsocketEndpoint>& endpoint) {
-    boost::asio::post(m_ioc, [this, endpoint_id, ep = std::move(endpoint)]() mutable {
-        ep->setOnOpen([this, endpoint_id]() {
-            auto [iter, inserted] = m_endpoint_configs.try_emplace(endpoint_id, m_ioc);
-            auto& config = iter->second;
-            config.attempting_reconnect = false;
-            
-            // Send all stored payloads for active consumers and producers
-            auto* endpoint = m_endpoints[endpoint_id].get();
-            
-            // Send consumer payloads
-            const auto& consumers = m_endpoint_consumers[endpoint_id];
-            for (size_t i = 0; i < config.consumer_payloads.size(); ++i) {
-                if (!config.consumer_payloads[i].empty() && 
-                    i < consumers.size() && consumers[i]) {
-                    endpoint->send(config.consumer_payloads[i]);
-                }
-            }
-            
-            // Send producer payloads
-            const auto& producers = m_endpoint_producers[endpoint_id];
-            for (size_t i = 0; i < config.producer_payloads.size(); ++i) {
-                if (!config.producer_payloads[i].empty() && 
-                    i < producers.size() && producers[i]) {
-                    endpoint->send(config.producer_payloads[i]);
-                }
-            }
-            
-            pushStatus(StatusLevel::INFO, ClientStatusType::ACTIVE, 
-                      "Connected successfully for endpoint " + endpoint_id);
-        });
+                                       std::unique_ptr<WebsocketEndpoint> endpoint) 
+{
+    // Store the endpoint first
+    auto& stored_endpoint = m_endpoints[endpoint_id] = std::move(endpoint);
+
+    // Do this directly to not get any issues with race conditions or something. Make this atomic
+    stored_endpoint->setOnOpen([this, endpoint_id, endpoint = stored_endpoint.get()]() {
+        auto [iter, inserted] = m_endpoint_configs.try_emplace(endpoint_id, m_ioc);
+        auto& config = iter->second;
+        config.attempting_reconnect = false;
         
-        ep->setOnFail([this, endpoint_id](const std::string& reason) {
-            handleEndpointFailure(endpoint_id, reason, ClientStatusType::CONNECTION_FAILED);
-        });
-        
-        ep->setOnClose([this, endpoint_id]() {
-            handleEndpointClosure(endpoint_id);
-        });
-        ep->setOnMessage([this, endpoint_id](void* data, size_t len) {
-            // Here we need to route to all active consumers for this endpoint
-            const auto& consumers = m_endpoint_consumers[endpoint_id];
-            
-            // For each active consumer, we need to send to their input adapter
-            PushBatch batch( m_engine -> rootEngine() );  // TODO is this right?
-            for (size_t consumer_id = 0; consumer_id < consumers.size(); ++consumer_id) {
-                if (consumers[consumer_id]) {
-                    auto tup = std::tuple<std::string, void*> {endpoint_id, data};
-                    m_inputAdapters[consumer_id] -> processMessage( tup, len, &batch );
-                }
+        // Send consumer payloads
+        const auto& consumers = m_endpoint_consumers[endpoint_id];
+        for (size_t i = 0; i < config.consumer_payloads.size(); ++i) {
+            if (!config.consumer_payloads[i].empty() && 
+                i < consumers.size() && consumers[i]) {
+                endpoint->send(config.consumer_payloads[i]);
             }
-        });
-        ep -> run();
-        m_endpoints[endpoint_id] = std::move(ep);
+        }
+        
+        // Send producer payloads
+        const auto& producers = m_endpoint_producers[endpoint_id];
+        for (size_t i = 0; i < config.producer_payloads.size(); ++i) {
+            if (!config.producer_payloads[i].empty() && 
+                i < producers.size() && producers[i]) {
+                endpoint->send(config.producer_payloads[i]);
+            }
+        }
+        
+        pushStatus(StatusLevel::INFO, ClientStatusType::ACTIVE, 
+                    "Connected successfully for endpoint " + endpoint_id);
     });
+
+    stored_endpoint->setOnFail([this, endpoint_id](const std::string& reason) {
+        handleEndpointFailure(endpoint_id, reason, ClientStatusType::CONNECTION_FAILED);
+    });
+
+    stored_endpoint->setOnClose([this, endpoint_id]() {
+        handleEndpointClosure(endpoint_id);
+    });
+    stored_endpoint->setOnMessage([this, endpoint_id](void* data, size_t len) {
+        // Here we need to route to all active consumers for this endpoint
+        const auto& consumers = m_endpoint_consumers[endpoint_id];
+        
+        // For each active consumer, we need to send to their input adapter
+        PushBatch batch( m_engine -> rootEngine() );  // TODO is this right?
+        for (size_t consumer_id = 0; consumer_id < consumers.size(); ++consumer_id) {
+            if (consumers[consumer_id]) {
+                std::cout << "On consumer_id " << consumer_id << "\n";
+                std::vector<uint8_t> data_copy(static_cast<uint8_t*>(data), 
+                                    static_cast<uint8_t*>(data) + len);
+                // auto tup = std::tuple<std::string, void*> {endpoint_id, data};
+                auto tup = std::tuple<std::string, void*>{endpoint_id, data_copy.data()};
+                m_inputAdapters[consumer_id] -> processMessage( tup, len, &batch );
+            }
+        }
+    });
+    stored_endpoint -> run();
 }
 
 
@@ -347,9 +350,11 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
     size_t validated_id = validateCallerId(caller_id);
     autogen::ActionType action = autogen::ActionType::create( properties.get<std::string>("action") );
     auto is_consumer = properties.get<bool>("is_subscribe");
+    std::cout << "action " << action << "caller_id " << caller_id << "\n";
     
     switch(action.enum_value()) {
         case autogen::ActionType::enum_::CONNECT: {
+            std::cout << "HERE HERE " << endpoint_id <<"\n";
             auto persistent = properties.get<bool>("persistent");
             if (!persistent){
                 ClientAdapterManager::setupOneOffConnection(endpoint_id, properties);
@@ -381,7 +386,7 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
                 
                 if (is_new_endpoint) {
                     auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
-                    ClientAdapterManager::setupEndpoint(endpoint_id, endpoint);
+                    ClientAdapterManager::setupEndpoint(endpoint_id, std::move(endpoint));
                 }
             }
             break;
@@ -507,12 +512,14 @@ void ClientAdapterManager::stop() {
 
 PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushMode pushMode, const Dictionary & properties)
 {   
+    std::cout << "Adapter manage m_dynamic " << m_dynamic << "\n";
     if ( m_dynamic ){
         auto input_adapter = m_engine -> createOwnedObject<ClientInputAdapter>(
             // m_engine,
             type,
             pushMode,
-            properties    
+            properties,
+            m_dynamic   
         );
         m_inputAdapters.push_back(input_adapter);
         return input_adapter;
@@ -523,7 +530,8 @@ PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushM
             // m_engine,
             type,
             pushMode,
-            properties    
+            properties,
+            m_dynamic    
         );
     }
     return m_inputAdapter;

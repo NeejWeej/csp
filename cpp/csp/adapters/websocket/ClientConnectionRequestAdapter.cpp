@@ -19,7 +19,9 @@ void ClientConnectionRequestAdapter::executeImpl()
     // std::cout << "WE ARE GETTING A DICT" << "\n";
     // Dictionary val = input() -> lastValueTyped<Dictionary>();
     auto raw_val = input() -> lastValueTyped<PyObject*>();
+    // I hope this
     Dictionary val = python::fromPython<Dictionary>( raw_val );
+    // Dictionary val = Dictionary( python::fromPython<Dictionary>( raw_val )) ;
     // std::cout << "WE GOT A DICT" << "\n";
     // Make a copy of the Dictionary, not just the pointer
     // Dictionary valueCopy = *val;  // Copy the actual dictionary

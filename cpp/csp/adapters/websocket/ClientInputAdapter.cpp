@@ -7,8 +7,11 @@ ClientInputAdapter::ClientInputAdapter(
     Engine * engine,
     CspTypePtr & type,
     PushMode pushMode,
-    const Dictionary & properties
-) : PushInputAdapter(engine, type, pushMode), m_callerId( properties.get<int64_t>("caller_id") )
+    const Dictionary & properties,
+    bool dynamic
+) : PushInputAdapter(engine, type, pushMode), 
+    m_callerId( properties.get<int64_t>("caller_id") ),
+    m_dynamic( dynamic ) 
 {
     if( type -> type() != CspType::Type::STRUCT &&
         type -> type() != CspType::Type::STRING )
@@ -21,7 +24,6 @@ ClientInputAdapter::ClientInputAdapter(
         if( !metaFieldMap.empty() && type -> type() != CspType::Type::STRUCT )
             CSP_THROW( ValueError, "meta_field_map is not supported on non-struct types" );
     }
-    m_dynamic = properties.get<bool>("dynamic");
     if ( m_dynamic ){
         auto& actual_type = static_cast<const CspStructType &>( *type );
         auto& nested_type = actual_type.meta()-> field( "raw_msg" ) -> type();
@@ -52,12 +54,16 @@ void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, si
     std::string source = std::get<0>(data);
     std::cout << source << "\n";
     void* c = std::get<1>(data);
-
+    // std::cout << "Got data pointer: " << c << "\n";
+    // std::cout << "dynamic??\n";
+    // std::cout << "m_dynamic " << m_dynamic << "\n";
     if ( m_dynamic ){
         auto& actual_type = static_cast<const CspStructType &>( *dataType() );
+        // std::cout << "Got actual type " << "\n";
         auto& nested_type = actual_type.meta()-> field( "raw_msg" ) -> type();
-
+        // std::cout << "Got nested type " << "\n";
         auto true_val = actual_type.meta() -> create();
+        // std::cout << "Got template struct " << "\n";
         actual_type.meta()->field("uri")->setValue( true_val.get(), source );
 
         if( nested_type -> type() == CspType::Type::STRUCT )
@@ -68,7 +74,9 @@ void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, si
             pushTick( std::move(true_val), batch );
         } else if ( nested_type -> type() == CspType::Type::STRING )
         {
+            // std::cout << "getting msg\n";
             auto msg =  std::string((char const*)c, t);
+            // std::cout << "got message " << msg << "\n";
             actual_type.meta()->field("raw_msg")->setValue( true_val.get(), msg );
             std::cout << msg << "\n";
 

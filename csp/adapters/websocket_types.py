@@ -28,7 +28,7 @@ class WebsocketHeaderUpdate(Struct):
 
 class ConnectionRequest(Struct):
     uri: str
-    action: ActionType  # Connect, Disconnect, Ping, etc
+    action: ActionType = ActionType.CONNECT  # Connect, Disconnect, Ping, etc
     # Whetehr we maintain the connection
     persistent: bool = True  # Only relevant for Connect requests
     reconnect_interval: timedelta = timedelta(seconds=2)

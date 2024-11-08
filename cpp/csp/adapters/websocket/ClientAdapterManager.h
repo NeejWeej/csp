@@ -86,7 +86,7 @@ public:
     // void removeEndpoint(const std::string& id);
     void handleEndpointFailure(const std::string& endpoint_id, const std::string& reason, ClientStatusType status_type);
     void handleEndpointClosure(const std::string& endpoint_id);
-    void setupEndpoint(const std::string& endpoint_id, std::unique_ptr<WebsocketEndpoint>& endpoint);
+    void setupEndpoint(const std::string& endpoint_id, std::unique_ptr<WebsocketEndpoint> endpoint);
     void shutdownEndpoint(const std::string& endpoint_id);
 
 

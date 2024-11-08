@@ -8,12 +8,21 @@ from typing import List
 import csp
 from csp import ts
 
+# csp.set_print_full_exception_stack(True)
+
 if os.environ.get("CSP_TEST_WEBSOCKET"):
     import tornado.ioloop
     import tornado.web
     import tornado.websocket
 
-    from csp.adapters.websocket import JSONTextMessageMapper, RawTextMessageMapper, Status, WebsocketAdapterManager
+    from csp.adapters.websocket import (
+        ActionType,
+        ConnectionRequest,
+        JSONTextMessageMapper,
+        RawTextMessageMapper,
+        Status,
+        WebsocketAdapterManager,
+    )
 
     class EchoWebsocketHandler(tornado.websocket.WebSocketHandler):
         def on_message(self, msg):
@@ -54,6 +63,38 @@ class TestWebsocket(unittest.TestCase):
 
         msgs = csp.run(g, starttime=datetime.now(pytz.UTC), realtime=True)
         assert msgs["recv"][0][1] == "Hello, World!"
+
+    def test_send_recv_json_dynamic_on_connect_payload(self):
+        class MsgStruct(csp.Struct):
+            a: int
+            b: str
+
+        @csp.graph
+        def g():
+            ws = WebsocketAdapterManager(dynamic=True)
+            conn_request = ConnectionRequest(
+                uri="ws://localhost:8000/",
+                action=ActionType.CONNECT,
+                on_connect_payload=MsgStruct(a=1234, b="im a string").to_json(),
+            )
+            ws.send(csp.null_ts(object), connection_request=csp.const(conn_request))
+            # status = ws.status()
+            # ws.send(send_msg_on_open(status))
+            subscribe_connection_request = ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.CONNECT)
+            recv = ws.subscribe(
+                MsgStruct, JSONTextMessageMapper(), connection_request=csp.const(subscribe_connection_request)
+            )
+
+            csp.add_graph_output("recv", recv)
+            csp.stop_engine(recv)
+
+        msgs = csp.run(g, starttime=datetime.now(pytz.UTC), realtime=True)
+        obj = msgs["recv"][0][1]
+        assert obj.uri == "ws://localhost:8000/"
+        true_obj = obj.raw_msg
+        assert isinstance(true_obj, MsgStruct)
+        assert true_obj.a == 1234
+        assert true_obj.b == "im a string"
 
     def test_send_recv_json(self):
         class MsgStruct(csp.Struct):
@@ -118,6 +159,40 @@ class TestWebsocket(unittest.TestCase):
         msgs = csp.run(g, n, starttime=datetime.now(pytz.UTC), realtime=True)
         assert len(msgs["recv"]) == n
         assert msgs["recv"][0][1] != msgs["recv"][-1][1]
+
+    def test_send_multiple_and_recv_msgs_dynamic(self):
+        @csp.graph
+        def g():
+            ws = WebsocketAdapterManager(dynamic=True)
+            conn_request = csp.const(
+                ConnectionRequest(
+                    uri="ws://localhost:8000/",
+                    action=ActionType.CONNECT,
+                )
+            )
+            val = csp.curve(int, [(timedelta(milliseconds=50), 0), (timedelta(milliseconds=500), 1)])
+            hello = csp.apply(val, lambda x: f"hi world{x}", str)
+            delayed_conn_req = csp.delay(conn_request, delay=timedelta(milliseconds=100))
+
+            # We connect immediately and send out the hello message
+            ws.send(hello, connection_request=conn_request)
+
+            recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=delayed_conn_req)
+            recv2 = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request)
+
+            merged = csp.flatten([recv, recv2])
+            csp.add_graph_output("recv", merged.raw_msg)
+
+            stop = csp.filter(csp.count(merged) == 3, merged)
+            csp.stop_engine(stop)
+
+        msgs = csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=1), realtime=True)
+        assert len(msgs["recv"]) == 3
+        # the first message sent out, only the second subscribe call picks this up
+        assert msgs["recv"][0][1] == "hi world0"
+        # Both the subscribe calls receive this message
+        assert msgs["recv"][1][1] == "hi world1"
+        assert msgs["recv"][2][1] == "hi world1"
 
     def test_unkown_host_graceful_shutdown(self):
         @csp.graph
