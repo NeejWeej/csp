@@ -21,10 +21,10 @@ from csp.impl.wiring import input_adapter_def, output_adapter_def, status_adapte
 from csp.impl.wiring.delayed_node import DelayedNodeWrapperDef
 from csp.lib import _websocketadapterimpl
 
+from .websocket_types import ActionType  # noqa
 from .websocket_types import ConnectionRequest, WebsocketHeaderUpdate
 
 # InternalConnectionRequest,
-
 _ = (
     BytesMessageProtoMapper,
     DateTimeType,
@@ -527,6 +527,18 @@ class WebsocketAdapterManager:
             conn_prop["is_subscribe"] = is_subscribe
             return conn_prop
 
+    def get_wrapper_struct(self, ts_type: type):
+        if (dynamic_type := self._wrapper_struct_dict.get(ts_type)) is None:
+            # I want to preserve type information
+            # Not sure a better way to do this
+            class CustomWrapperStruct(csp.Struct):
+                msg: ts_type  #  noqa
+                uri: str
+
+            dynamic_type = CustomWrapperStruct
+            self._wrapper_struct_dict[ts_type] = dynamic_type
+        return dynamic_type
+
     def subscribe(
         self,
         ts_type: type,
@@ -537,7 +549,7 @@ class WebsocketAdapterManager:
         connection_request: Optional[ts[List[ConnectionRequest]]] = None,
     ):
         """If dynamic is True, this will tick a custom WrapperStruct,
-        with 'raw_msg' as the correct type of the message.
+        with 'msg' as the correct type of the message.
         And 'uri' that specifies the 'uri' the message comes from.
 
         Otherwise, returns just message.
@@ -552,27 +564,8 @@ class WebsocketAdapterManager:
         elif not self._dynamic:
             raise ValueError("ConnectionRequests must be None when dynamic is False")
 
-        dynamic_type = None
         # Only relevant for dynamic mode
         adapter_props = {"caller_id": caller_id, "is_subscribe": True, "dynamic": self._dynamic}
-        if self._dynamic:
-            request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
-            # We just declare it here, so it gets included in the graph
-            # since nothing is returned.
-            csp.print("req dict", request_dict)
-            _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
-
-            dynamic_type = self._wrapper_struct_dict.get(ts_type)
-            if dynamic_type is None:
-                # I want to preserve type information
-                # Not sure a better way to do this
-                class CustomWrapperStruct(csp.Struct):
-                    raw_msg: ts_type  #  noqa
-                    uri: str
-
-                dynamic_type = CustomWrapperStruct
-                self._wrapper_struct_dict[ts_type] = dynamic_type
-
         field_map = field_map or {}
         meta_field_map = meta_field_map or {}
         if isinstance(field_map, str):
@@ -587,9 +580,16 @@ class WebsocketAdapterManager:
 
         properties.update(adapter_props)
 
-        true_type = dynamic_type if self._dynamic else ts_type
+        if self._dynamic:
+            request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
+            # We just declare it here, so it gets included in the graph
+            # since nothing is returned.
+            # csp.print("req dict", request_dict)
+            _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
+            # We wrap the return type in a struct, to mark messages with the url they come from
+            ts_type = self.get_wrapper_struct(ts_type=ts_type)
 
-        return _websocket_input_adapter_def(self, true_type, properties, push_mode=push_mode)
+        return _websocket_input_adapter_def(self, ts_type, properties, push_mode=push_mode)
 
     def send(self, x: ts["T"], connection_request: Optional[ts[ConnectionRequest]] = None):
         caller_id = self._send_call_id
@@ -624,6 +624,9 @@ class WebsocketAdapterManager:
 
     def _create(self, engine, memo):
         """method needs to return the wrapped c++ adapter manager"""
+        subscribe_and_send_calls = {"subscribe_calls": self._subscribe_call_id, "send_calls": self._send_call_id}
+        # TODO: Make this better, maybe use properties
+        self._properties.update(subscribe_and_send_calls)
         return _websocketadapterimpl._websocket_adapter_manager(engine, self._properties)
 
 

@@ -21,7 +21,10 @@ ClientAdapterManager::ClientAdapterManager( Engine* engine, const Dictionary & p
     m_ioc(),
     m_active( false ), 
     m_shouldRun( false ), 
-    m_endpoint( std::make_unique<WebsocketEndpoint>( m_ioc, properties ) ),
+    m_endpoint(!properties.get<bool>("dynamic") ? 
+        std::make_unique<WebsocketEndpoint>( m_ioc, properties ) : 
+        nullptr),
+    // m_endpoint( std::make_unique<WebsocketEndpoint>( m_ioc, properties ) ),
     m_inputAdapter( nullptr ), 
     m_outputAdapter( nullptr ),
     m_updateAdapter( nullptr ),
@@ -31,14 +34,30 @@ ClientAdapterManager::ClientAdapterManager( Engine* engine, const Dictionary & p
         std::make_optional(boost::asio::make_work_guard(m_ioc)) : 
         std::nullopt),
     m_dynamic( properties.get<bool>("dynamic") )
-{ };
+{
+    auto input_size = static_cast<size_t>(properties.get<int64_t>("subscribe_calls"));
+    m_inputAdapters.resize(input_size, nullptr);
+    // send_calls
+    auto output_size = static_cast<size_t>(properties.get<int64_t>("send_calls"));
+    m_outputAdapters.resize(output_size, nullptr);
+};
 
 ClientAdapterManager::~ClientAdapterManager()
 { };
 
 void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
     AdapterManager::start(starttime, endtime);
-    if( m_dynamic ){
+    // same as dynamic == True
+    if( m_endpoint == nullptr ){
+        // We need to make sure none of the input adapters were pruned.
+        auto null_ptr = std::find_if(m_inputAdapters.begin(), m_inputAdapters.end(), [](const ClientInputAdapter* ptr) {
+            return ptr == nullptr;
+        });
+        std::string error_msg = "Input adapter has been pruned, make sure all 'subscribe' calls are connected to other edges or output adapters.";
+        if (!m_inputAdapters.empty() && null_ptr != m_inputAdapters.end()) {
+            auto bad_position = std::to_string(std::distance(m_inputAdapters.begin(), null_ptr));
+            CSP_THROW( ValueError, error_msg + " Subscribe call at index: " + bad_position + " has been pruned." );
+        }
         // maybe restart here?
         m_shouldRun = true;
         m_thread = std::make_unique<std::thread>([this]() {
@@ -514,6 +533,8 @@ PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushM
 {   
     std::cout << "Adapter manage m_dynamic " << m_dynamic << "\n";
     if ( m_dynamic ){
+        auto caller_id = properties.get<int64_t>("caller_id");
+        size_t validated_id = validateCallerId(caller_id);
         auto input_adapter = m_engine -> createOwnedObject<ClientInputAdapter>(
             // m_engine,
             type,
@@ -521,8 +542,8 @@ PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushM
             properties,
             m_dynamic   
         );
-        m_inputAdapters.push_back(input_adapter);
-        return input_adapter;
+        m_inputAdapters[validated_id] = input_adapter;
+        return m_inputAdapters[validated_id];
     }
     if (m_inputAdapter == nullptr)
     {
@@ -546,8 +567,9 @@ OutputAdapter* ClientAdapterManager::getOutputAdapter( const Dictionary & proper
         assert(m_outputAdapters.size() == validated_id);
 
         auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>( *m_endpoint, this, validated_id, m_ioc, m_dynamic );
-        m_outputAdapters.push_back(output_adapter);
-        return output_adapter;
+        // m_outputAdapters.push_back(output_adapter);
+        m_outputAdapters[validated_id] = output_adapter;
+        return m_outputAdapters[validated_id];
     }
     // validated_id does not matter here
     if (m_outputAdapter == nullptr) m_outputAdapter = m_engine -> createOwnedObject<ClientOutputAdapter>( *m_endpoint, this, 0, m_ioc, m_dynamic );

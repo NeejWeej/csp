@@ -26,7 +26,7 @@ ClientInputAdapter::ClientInputAdapter(
     }
     if ( m_dynamic ){
         auto& actual_type = static_cast<const CspStructType &>( *type );
-        auto& nested_type = actual_type.meta()-> field( "raw_msg" ) -> type();
+        auto& nested_type = actual_type.meta()-> field( "msg" ) -> type();
 
         m_converter = adapters::utils::MessageStructConverterCache::instance().create( nested_type, properties );
     }
@@ -60,7 +60,7 @@ void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, si
     if ( m_dynamic ){
         auto& actual_type = static_cast<const CspStructType &>( *dataType() );
         // std::cout << "Got actual type " << "\n";
-        auto& nested_type = actual_type.meta()-> field( "raw_msg" ) -> type();
+        auto& nested_type = actual_type.meta()-> field( "msg" ) -> type();
         // std::cout << "Got nested type " << "\n";
         auto true_val = actual_type.meta() -> create();
         // std::cout << "Got template struct " << "\n";
@@ -69,7 +69,7 @@ void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, si
         if( nested_type -> type() == CspType::Type::STRUCT )
         {
             auto tick = m_converter -> asStruct( c, t );
-            actual_type.meta()->field("raw_msg")->setValue( true_val.get(), std::move(tick) );
+            actual_type.meta()->field("msg")->setValue( true_val.get(), std::move(tick) );
 
             pushTick( std::move(true_val), batch );
         } else if ( nested_type -> type() == CspType::Type::STRING )
@@ -77,7 +77,7 @@ void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, si
             // std::cout << "getting msg\n";
             auto msg =  std::string((char const*)c, t);
             // std::cout << "got message " << msg << "\n";
-            actual_type.meta()->field("raw_msg")->setValue( true_val.get(), msg );
+            actual_type.meta()->field("msg")->setValue( true_val.get(), msg );
             std::cout << msg << "\n";
 
             pushTick( std::move(true_val), batch );
