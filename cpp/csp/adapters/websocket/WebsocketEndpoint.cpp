@@ -59,6 +59,10 @@ void WebsocketEndpoint::stop( bool stop_ioc )
     if(m_session) m_session->stop(); 
 }
 
+void WebsocketEndpoint::updateHeaders(csp::Dictionary properties){
+    auto headers = properties.get<DictionaryPtr>("headers");
+    m_properties.update("headers", headers);
+}
 
 csp::Dictionary& WebsocketEndpoint::getProperties() {
     return m_properties;

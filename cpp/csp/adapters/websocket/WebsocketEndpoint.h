@@ -359,6 +359,7 @@ public:
     void setOnMessage(char_cb on_message);
     void setOnClose(void_cb on_close);
     void setOnSendFail(string_cb on_send_fail);
+    void updateHeaders(Dictionary properties);
     Dictionary& getProperties();
     void run();
     void stop( bool stop_ioc = true);

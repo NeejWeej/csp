@@ -29,63 +29,53 @@ if os.environ.get("CSP_TEST_WEBSOCKET"):
         def on_message(self, msg):
             return self.write_message(msg)
 
-    @contextmanager
-    def tornado_server(port: int = 8001):
-        ready_event2 = threading.Event()
-        io_loop2 = None
-        app2 = None
-        io_thread2 = None
 
-        def run_io_loop2():
-            nonlocal io_loop2, app2  # Use nonlocal to modify outer scope variables
-            io_loop2 = tornado.ioloop.IOLoop()
-            io_loop2.make_current()
-            app2 = tornado.web.Application([(r"/", EchoWebsocketHandler)])
-            app2.listen(port)
-            ready_event2.set()
-            io_loop2.start()
+@contextmanager
+def create_tornado_server(port: int):
+    """Base context manager for creating a Tornado server in a thread"""
+    ready_event = threading.Event()
+    io_loop = None
+    app = None
+    io_thread = None
 
-        io_thread2 = threading.Thread(target=run_io_loop2)
-        io_thread2.start()
-        ready_event2.wait()
+    def run_io_loop():
+        nonlocal io_loop, app
+        io_loop = tornado.ioloop.IOLoop()
+        io_loop.make_current()
+        app = tornado.web.Application([(r"/", EchoWebsocketHandler)])
+        app.listen(port)
+        ready_event.set()
+        io_loop.start()
 
-        try:
-            yield
-        finally:
-            io_loop2.add_callback(io_loop2.stop)
-            if io_thread2:
-                io_thread2.join(timeout=5)
-                if io_thread2.is_alive():
-                    raise RuntimeError("IOLoop failed to stop")
+    io_thread = threading.Thread(target=run_io_loop)
+    io_thread.start()
+    ready_event.wait()
+
+    try:
+        yield io_loop, app, io_thread
+    finally:
+        io_loop.add_callback(io_loop.stop)
+        if io_thread:
+            io_thread.join(timeout=5)
+            if io_thread.is_alive():
+                raise RuntimeError("IOLoop failed to stop")
 
 
-@pytest.mark.skipif(not os.environ.get("CSP_TEST_WEBSOCKET"), reason="Skipping websocket adapter tests")
+@contextmanager
+def tornado_server(port: int = 8001):
+    """Simplified context manager that uses the base implementation"""
+    with create_tornado_server(port) as (_io_loop, _app, _io_thread):
+        yield
+
+
 class TestWebsocket:
     @pytest.fixture(scope="class", autouse=True)
     def setup_tornado(self, request):
-        # Create class-level attributes
-        request.cls.ready_event = threading.Event()
-
-        def run_io_loop():
-            request.cls.io_loop = tornado.ioloop.IOLoop()
-            request.cls.io_loop.make_current()
-            request.cls.app = tornado.web.Application([(r"/", EchoWebsocketHandler)])
-            request.cls.app.listen(8000)
-            request.cls.ready_event.set()  # Signal that setup is complete
-            request.cls.io_loop.start()
-
-        request.cls.io_thread = threading.Thread(target=run_io_loop)
-        request.cls.io_thread.start()
-        request.cls.ready_event.wait()  # Wait for IOLoop to be ready
-
-        # Teardown
-        yield
-
-        request.cls.io_loop.add_callback(request.cls.io_loop.stop)
-        if request.cls.io_thread:
-            request.cls.io_thread.join(timeout=5)  # Add timeout to prevent hanging
-            if request.cls.io_thread.is_alive():
-                raise RuntimeError("IOLoop failed to stop")
+        with create_tornado_server(8000) as (io_loop, app, io_thread):
+            request.cls.io_loop = io_loop
+            request.cls.app = app
+            request.cls.io_thread = io_thread
+            yield
 
     def test_send_recv_msg(self):
         @csp.node
@@ -122,6 +112,7 @@ class TestWebsocket:
             )
             if not send_payload_subscribe:
                 # We send payload via the dummy send function
+                # The 'on_connect_payload sends the result
                 ws.send(csp.null_ts(object), connection_request=csp.const(conn_request))
             subscribe_connection_request = (
                 ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.CONNECT)
@@ -301,37 +292,40 @@ class TestWebsocket:
             assert msgs["recv2"][0][1].msg == "hey world from 8001"
             assert msgs["recv2"][0][1].uri == "ws://localhost:8001/"
 
-    def test_unkown_host_graceful_shutdown(self):
-        @csp.graph
-        def g():
-            ws = WebsocketAdapterManager("wss://localhost/")
-            assert ws._properties["port"] == "443"
-            csp.stop_engine(ws.status())
-
-        csp.run(g, starttime=datetime.now(pytz.UTC), realtime=True)
-
-    def test_send_recv_burst_json(self):
+    @pytest.mark.parametrize("dynamic", [False, True])
+    def test_send_recv_burst_json(self, dynamic):
         class MsgStruct(csp.Struct):
             a: int
             b: str
 
         @csp.node
-        def send_msg_on_open(status: ts[Status]) -> ts[str]:
-            if csp.ticked(status):
-                return MsgStruct(a=1234, b="im a string").to_json()
-
-        @csp.node
-        def my_edge_that_handles_burst(objs: ts[List[MsgStruct]]) -> ts[bool]:
+        def my_edge_that_handles_burst(objs: ts[List[MsgStruct]]):
             if csp.ticked(objs):
-                return True
+                # Does nothing but makes sure it's not pruned
+                ...
 
         @csp.graph
         def g():
-            ws = WebsocketAdapterManager("ws://localhost:8000/")
-            status = ws.status()
-            ws.send(send_msg_on_open(status))
-            recv = ws.subscribe(MsgStruct, JSONTextMessageMapper(), push_mode=csp.PushMode.BURST)
-            _ = my_edge_that_handles_burst(recv)
+            if dynamic:
+                ws = WebsocketAdapterManager(dynamic=True)
+                wrapped_recv = ws.subscribe(
+                    MsgStruct,
+                    JSONTextMessageMapper(),
+                    push_mode=csp.PushMode.BURST,
+                    connection_request=csp.const(
+                        ConnectionRequest(
+                            uri="ws://localhost:8000/", on_connect_payload=MsgStruct(a=1234, b="im a string").to_json()
+                        )
+                    ),
+                )
+                recv = csp.apply(wrapped_recv, lambda vals: [v.msg for v in vals], List[MsgStruct])
+            else:
+                ws = WebsocketAdapterManager("ws://localhost:8000/")
+                status = ws.status()
+                ws.send(csp.apply(status, lambda _x: MsgStruct(a=1234, b="im a string").to_json(), str))
+                recv = ws.subscribe(MsgStruct, JSONTextMessageMapper(), push_mode=csp.PushMode.BURST)
+
+            my_edge_that_handles_burst(recv)
             csp.add_graph_output("recv", recv)
             csp.stop_engine(recv)
 
@@ -341,3 +335,12 @@ class TestWebsocket:
         innerObj = obj[0]
         assert innerObj.a == 1234
         assert innerObj.b == "im a string"
+
+    def test_unkown_host_graceful_shutdown(self):
+        @csp.graph
+        def g():
+            ws = WebsocketAdapterManager("wss://localhost/")
+            assert ws._properties["port"] == "443"
+            csp.stop_engine(ws.status())
+
+        csp.run(g, starttime=datetime.now(pytz.UTC), realtime=True)

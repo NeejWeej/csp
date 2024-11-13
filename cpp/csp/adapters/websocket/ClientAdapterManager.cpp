@@ -21,7 +21,7 @@ ClientAdapterManager::ClientAdapterManager( Engine* engine, const Dictionary & p
     m_ioc(),
     m_active( false ), 
     m_shouldRun( false ), 
-    m_endpoint(!properties.get<bool>("dynamic") ? 
+        m_endpoint(!properties.get<bool>("dynamic") ? 
         std::make_unique<WebsocketEndpoint>( m_ioc, properties ) : 
         nullptr),
     // m_endpoint( std::make_unique<WebsocketEndpoint>( m_ioc, properties ) ),
@@ -99,7 +99,6 @@ void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
         m_endpoint -> setOnClose(
             [ this ]() {
                 m_active = false;
-                std::cout << "We must surely be here\n";
                 pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
             }
         );
@@ -170,7 +169,7 @@ void ClientAdapterManager::setupOneOffConnection(const std::string& endpoint_id,
             // Special onOpen for one-off: send payload and disconnect
             ep->setOnOpen([this, endpoint_id, payload, validated_id, is_consumer]() {
                 auto* endpoint = m_endpoints[endpoint_id].get();
-                
+                pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully to " + endpoint_id );
                 // Send the payload
                 if (!payload.empty()) {
                     endpoint->send(payload);
@@ -200,10 +199,10 @@ void ClientAdapterManager::setupOneOffConnection(const std::string& endpoint_id,
                 }
             );
             ep -> setOnSendFail(
-                [ this ]( const std::string& s ) {
+                [ this, endpoint_id ]( const std::string& s ) {
                     std::stringstream ss;
                     ss << "Failed to send: " << s;
-                    pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() );
+                    pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() + "for " + endpoint_id );
                 }
             );
             ep -> run();
@@ -301,7 +300,6 @@ void ClientAdapterManager::setupEndpoint(const std::string& endpoint_id,
         PushBatch batch( m_engine -> rootEngine() );  // TODO is this right?
         for (size_t consumer_id = 0; consumer_id < consumers.size(); ++consumer_id) {
             if (consumers[consumer_id]) {
-                std::cout << "On consumer_id " << consumer_id << "\n";
                 std::vector<uint8_t> data_copy(static_cast<uint8_t*>(data), 
                                     static_cast<uint8_t*>(data) + len);
                 // auto tup = std::tuple<std::string, void*> {endpoint_id, data};
@@ -351,7 +349,11 @@ void ClientAdapterManager::handleEndpointFailure(const std::string& endpoint_id,
     
     std::stringstream ss;
     ss << "Connection Failure for " << endpoint_id << ": " << reason;
-    pushStatus(StatusLevel::ERROR, status_type, ss.str());
+    if ( status_type == ClientStatusType::CLOSED || status_type == ClientStatusType::ACTIVE )
+        pushStatus(StatusLevel::INFO, status_type, ss.str());
+    else{
+       pushStatus(StatusLevel::ERROR, status_type, ss.str());
+    }
 }
 
 void ClientAdapterManager::handleEndpointClosure(const std::string& endpoint_id) {
@@ -369,11 +371,9 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
     size_t validated_id = validateCallerId(caller_id);
     autogen::ActionType action = autogen::ActionType::create( properties.get<std::string>("action") );
     auto is_consumer = properties.get<bool>("is_subscribe");
-    std::cout << "action " << action << "caller_id " << caller_id << "\n";
-    
+    // Change headers if needed here!
     switch(action.enum_value()) {
         case autogen::ActionType::enum_::CONNECT: {
-            std::cout << "HERE HERE " << endpoint_id <<"\n";
             auto persistent = properties.get<bool>("persistent");
             if (!persistent){
                 ClientAdapterManager::setupOneOffConnection(endpoint_id, properties);
@@ -402,10 +402,16 @@ void ClientAdapterManager::handleConnectionRequest(const Dictionary & properties
                 } else {
                     ClientAdapterManager::addProducer(endpoint_id, validated_id);
                 }
-                
+                // TODO do we want to update hedaers on the other actions too?
+                // This makes a copy for now, maybe make it not do that?
+                // Do we want to update if persistent if false too?
                 if (is_new_endpoint) {
                     auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
+                    endpoint -> updateHeaders(properties);
                     ClientAdapterManager::setupEndpoint(endpoint_id, std::move(endpoint));
+                }
+                else{
+                    m_endpoints[endpoint_id]->updateHeaders(properties);
                 }
             }
             break;
