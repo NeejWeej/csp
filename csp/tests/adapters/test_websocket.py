@@ -9,8 +9,6 @@ from typing import List
 import csp
 from csp import ts
 
-# csp.set_print_full_exception_stack(True)
-
 if os.environ.get("CSP_TEST_WEBSOCKET"):
     import tornado.ioloop
     import tornado.web
@@ -23,51 +21,51 @@ if os.environ.get("CSP_TEST_WEBSOCKET"):
         RawTextMessageMapper,
         Status,
         WebsocketAdapterManager,
+        WebsocketStatus,
     )
 
     class EchoWebsocketHandler(tornado.websocket.WebSocketHandler):
         def on_message(self, msg):
             return self.write_message(msg)
 
+    @contextmanager
+    def create_tornado_server(port: int):
+        """Base context manager for creating a Tornado server in a thread"""
+        ready_event = threading.Event()
+        io_loop = None
+        app = None
+        io_thread = None
 
-@contextmanager
-def create_tornado_server(port: int):
-    """Base context manager for creating a Tornado server in a thread"""
-    ready_event = threading.Event()
-    io_loop = None
-    app = None
-    io_thread = None
+        def run_io_loop():
+            nonlocal io_loop, app
+            io_loop = tornado.ioloop.IOLoop()
+            io_loop.make_current()
+            app = tornado.web.Application([(r"/", EchoWebsocketHandler)])
+            app.listen(port)
+            ready_event.set()
+            io_loop.start()
 
-    def run_io_loop():
-        nonlocal io_loop, app
-        io_loop = tornado.ioloop.IOLoop()
-        io_loop.make_current()
-        app = tornado.web.Application([(r"/", EchoWebsocketHandler)])
-        app.listen(port)
-        ready_event.set()
-        io_loop.start()
+        io_thread = threading.Thread(target=run_io_loop)
+        io_thread.start()
+        ready_event.wait()
 
-    io_thread = threading.Thread(target=run_io_loop)
-    io_thread.start()
-    ready_event.wait()
+        try:
+            yield io_loop, app, io_thread
+        finally:
+            io_loop.add_callback(io_loop.stop)
+            if io_thread:
+                io_thread.join(timeout=5)
+                if io_thread.is_alive():
+                    raise RuntimeError("IOLoop failed to stop")
 
-    try:
-        yield io_loop, app, io_thread
-    finally:
-        io_loop.add_callback(io_loop.stop)
-        if io_thread:
-            io_thread.join(timeout=5)
-            if io_thread.is_alive():
-                raise RuntimeError("IOLoop failed to stop")
-
-
-@contextmanager
-def tornado_server(port: int = 8001):
-    """Simplified context manager that uses the base implementation"""
-    with create_tornado_server(port) as (_io_loop, _app, _io_thread):
-        yield
+    @contextmanager
+    def tornado_server(port: int = 8001):
+        """Simplified context manager that uses the base implementation"""
+        with create_tornado_server(port) as (_io_loop, _app, _io_thread):
+            yield
 
 
+@pytest.mark.skipif(os.environ.get("CSP_TEST_WEBSOCKET") is None, reason="'CSP_TEST_WEBSOCKET' env variable is not set")
 class TestWebsocket:
     @pytest.fixture(scope="class", autouse=True)
     def setup_tornado(self, request):
@@ -263,34 +261,52 @@ class TestWebsocket:
             csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=1), realtime=True)
 
     def test_dynamic_multiple_subscribers(self):
+        @csp.node
+        def send_on_status(status: ts[Status], uri: str, val: str) -> ts[str]:
+            if csp.ticked(status):
+                if uri in status.msg and status.status_code == WebsocketStatus.ACTIVE.value:
+                    return val
+
         with tornado_server():
+            # We do this to only spawn the tornado server once for both options
+            for use_on_connect_payload in [True, False]:
 
-            @csp.graph
-            def g():
-                ws = WebsocketAdapterManager(dynamic=True)
-                conn_request1 = csp.const(
-                    ConnectionRequest(uri="ws://localhost:8000/", on_connect_payload="hey world from 8000")
-                )
-                conn_request2 = csp.const(
-                    ConnectionRequest(uri="ws://localhost:8001/", on_connect_payload="hey world from 8001")
-                )
-                recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request1)
-                recv2 = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request2)
+                @csp.graph
+                def g():
+                    ws = WebsocketAdapterManager(dynamic=True)
+                    if use_on_connect_payload:
+                        conn_request1 = csp.const(
+                            ConnectionRequest(uri="ws://localhost:8000/", on_connect_payload="hey world from 8000")
+                        )
+                        conn_request2 = csp.const(
+                            ConnectionRequest(uri="ws://localhost:8001/", on_connect_payload="hey world from 8001")
+                        )
+                    else:
+                        conn_request1 = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
+                        conn_request2 = csp.const(ConnectionRequest(uri="ws://localhost:8001/"))
+                        status = ws.status()
+                        to_send = send_on_status(status, "ws://localhost:8000/", "hey world from 8000")
+                        to_send2 = send_on_status(status, "ws://localhost:8001/", "hey world from 8001")
+                        ws.send(to_send, connection_request=conn_request1)
+                        ws.send(to_send2, connection_request=conn_request2)
 
-                csp.add_graph_output("recv", recv)
-                csp.add_graph_output("recv2", recv2)
+                    recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request1)
+                    recv2 = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request2)
 
-                merged = csp.flatten([recv, recv2])
-                stop = csp.filter(csp.count(merged) == 2, merged)
-                csp.stop_engine(stop)
+                    csp.add_graph_output("recv", recv)
+                    csp.add_graph_output("recv2", recv2)
 
-            msgs = csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=5), realtime=True)
-            assert len(msgs["recv"]) == 1
-            assert msgs["recv"][0][1].msg == "hey world from 8000"
-            assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
-            assert len(msgs["recv2"]) == 1
-            assert msgs["recv2"][0][1].msg == "hey world from 8001"
-            assert msgs["recv2"][0][1].uri == "ws://localhost:8001/"
+                    merged = csp.flatten([recv, recv2])
+                    stop = csp.filter(csp.count(merged) == 2, merged)
+                    csp.stop_engine(stop)
+
+                msgs = csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=5), realtime=True)
+                assert len(msgs["recv"]) == 1
+                assert msgs["recv"][0][1].msg == "hey world from 8000"
+                assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
+                assert len(msgs["recv2"]) == 1
+                assert msgs["recv2"][0][1].msg == "hey world from 8001"
+                assert msgs["recv2"][0][1].uri == "ws://localhost:8001/"
 
     @pytest.mark.parametrize("dynamic", [False, True])
     def test_send_recv_burst_json(self, dynamic):

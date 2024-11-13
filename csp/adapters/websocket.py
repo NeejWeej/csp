@@ -21,8 +21,7 @@ from csp.impl.wiring import input_adapter_def, output_adapter_def, status_adapte
 from csp.impl.wiring.delayed_node import DelayedNodeWrapperDef
 from csp.lib import _websocketadapterimpl
 
-from .websocket_types import ActionType  # noqa
-from .websocket_types import ConnectionRequest, WebsocketHeaderUpdate
+from .websocket_types import ActionType, ConnectionRequest, WebsocketHeaderUpdate, WebsocketStatus  # noqa
 
 # InternalConnectionRequest,
 _ = (
@@ -33,9 +32,6 @@ _ = (
     RawTextMessageMapper,
 )
 T = TypeVar("T")
-
-
-logging.basicConfig(level=logging.DEBUG)
 
 
 try:

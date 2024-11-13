@@ -537,7 +537,6 @@ void ClientAdapterManager::stop() {
 
 PushInputAdapter* ClientAdapterManager::getInputAdapter(CspTypePtr & type, PushMode pushMode, const Dictionary & properties)
 {   
-    std::cout << "Adapter manage m_dynamic " << m_dynamic << "\n";
     if ( m_dynamic ){
         auto caller_id = properties.get<int64_t>("caller_id");
         size_t validated_id = validateCallerId(caller_id);

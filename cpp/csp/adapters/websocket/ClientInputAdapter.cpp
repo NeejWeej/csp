@@ -52,7 +52,6 @@ void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, si
 {
     // Extract the source string and data pointer from tuple
     std::string source = std::get<0>(data);
-    std::cout << source << "\n";
     void* c = std::get<1>(data);
     // std::cout << "Got data pointer: " << c << "\n";
     // std::cout << "dynamic??\n";
@@ -78,7 +77,6 @@ void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, si
             auto msg =  std::string((char const*)c, t);
             // std::cout << "got message " << msg << "\n";
             actual_type.meta()->field("msg")->setValue( true_val.get(), msg );
-            std::cout << msg << "\n";
 
             pushTick( std::move(true_val), batch );
         }
