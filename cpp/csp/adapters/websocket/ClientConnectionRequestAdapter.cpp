@@ -7,19 +7,25 @@ namespace csp::adapters::websocket {
 ClientConnectionRequestAdapter::ClientConnectionRequestAdapter(
     Engine * engine,
     ClientAdapterManager * clientAdapterManager,
-    net::io_context& ioc
+    net::io_context& ioc,
+    bool is_subscribe,
+    size_t caller_id
 ) : OutputAdapter( engine ),  
     m_clientAdapterManager( clientAdapterManager ),
-    m_ioc( ioc) 
+    m_ioc( ioc),
+    m_isSubscribe( is_subscribe ),
+    m_callerId( caller_id )
 { };
 
 void ClientConnectionRequestAdapter::executeImpl()
 {
-    // DictionaryPtr val = input() -> lastValueTyped<DictionaryPtr>();
-    // std::cout << "WE ARE GETTING A DICT" << "\n";
-    // Dictionary val = input() -> lastValueTyped<Dictionary>();
+    if (m_isSubscribe && m_clientAdapterManager->adapterPruned(m_callerId)){
+        // If the corresponding adapter is an input adapter, there is a chance
+        // it was pruned from the graph. In that case, this output adapter
+        // would do nothing.
+        return;
+    }
     auto raw_val = input() -> lastValueTyped<PyObject*>();
-    // I hope this
     Dictionary val = python::fromPython<Dictionary>( raw_val );
     // Dictionary val = Dictionary( python::fromPython<Dictionary>( raw_val )) ;
     // std::cout << "WE GOT A DICT" << "\n";
@@ -28,11 +34,6 @@ void ClientConnectionRequestAdapter::executeImpl()
     boost::asio::post(m_ioc, [this, val=std::move(val)]() {
         m_clientAdapterManager->handleConnectionRequest(val);
     });
-    // auto& caller_id = m_callerId;
-    // for( auto& update : input() -> lastValueTyped<std::vector<WebsocketHeaderUpdate::Ptr>>() )
-    // { 
-    //     if( update -> key_isSet() && update -> value_isSet() ) headers->update( update->key(), update->value() ); 
-    // }
 };
 
 }

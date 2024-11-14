@@ -81,6 +81,8 @@ public:
     void stop() override;
     void send(const std::string& value, const size_t & caller_id);
 
+
+    bool adapterPruned( size_t caller_id );
     void handleConnectionRequest( const Dictionary & properties);
     void setupOneOffConnection( const std::string& endpoint_id, const Dictionary& properties );
     // void removeEndpoint(const std::string& id);

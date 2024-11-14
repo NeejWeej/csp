@@ -231,7 +231,49 @@ class TestWebsocket:
         assert msgs["recv"][1][1] == "hi world1"
         assert msgs["recv"][2][1] == "hi world1"
 
-    def test_dynamic_pruned_subscribe_raises(self):
+    def test_dynamic_disconnect_connect_pruned_subscribe(self):
+        @csp.graph
+        def g():
+            ws = WebsocketAdapterManager(dynamic=True)
+
+            conn_request = csp.curve(
+                ConnectionRequest,
+                [
+                    (timedelta(), ConnectionRequest(uri="ws://localhost:8000/")),
+                    (timedelta(milliseconds=100), ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT)),
+                    (timedelta(milliseconds=350), ConnectionRequest(uri="ws://localhost:8000/")),
+                ]
+            )
+            const_conn_request = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
+            val = csp.curve(int, [(timedelta(milliseconds=200), 0), (timedelta(milliseconds=500), 1)])
+            hello = csp.apply(val, lambda x: f"hi world{x}", str)
+
+            # We connect immediately and send out the hello message
+            ws.send(hello, connection_request=const_conn_request)
+
+            recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request)
+            # This gets pruned by csp
+            recv2 = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request)
+            recv3 = ws.subscribe(str, RawTextMessageMapper(), connection_request=const_conn_request)
+
+            csp.add_graph_output("recv", recv)
+            csp.add_graph_output("recv3", recv3)
+            csp.stop_engine(recv)
+
+        msgs = csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=1), realtime=True)
+        assert len(msgs["recv"]) == 1
+        assert len(msgs["recv3"]) == 2
+        # Only the second message is received, since we disonnect before the first one is sent
+        assert msgs["recv"][0][1].msg == "hi world1"
+        assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
+
+        # This subscribe call received all the messages
+        assert msgs["recv3"][0][1].msg == "hi world0"
+        assert msgs["recv3"][0][1].uri == "ws://localhost:8000/"
+        assert msgs["recv3"][1][1].msg == "hi world1"
+        assert msgs["recv3"][1][1].uri == "ws://localhost:8000/"
+
+    def test_dynamic_pruned_subscribe(self):
         @csp.graph
         def g():
             ws = WebsocketAdapterManager(dynamic=True)
@@ -249,16 +291,17 @@ class TestWebsocket:
             ws.send(hello, connection_request=conn_request)
 
             recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=delayed_conn_req)
-            # This gets pruned by csp, which is problematic so we throw in this case.
+            # This gets pruned by csp
             recv2 = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request)
 
             csp.add_graph_output("recv", recv)
             csp.stop_engine(recv)
 
-        with pytest.raises(
-            ValueError, match=r".*Input adapter has been pruned.*Subscribe call at index: 1 has been pruned"
-        ):
-            csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=1), realtime=True)
+        msgs = csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=2), realtime=True)
+        assert len(msgs["recv"]) == 1
+        # Only the second message is received
+        assert msgs["recv"][0][1].msg == "hi world1"
+        assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
 
     def test_dynamic_multiple_subscribers(self):
         @csp.node

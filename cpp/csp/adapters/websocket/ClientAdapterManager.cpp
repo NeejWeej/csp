@@ -50,14 +50,6 @@ void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
     // same as dynamic == True
     if( m_endpoint == nullptr ){
         // We need to make sure none of the input adapters were pruned.
-        auto null_ptr = std::find_if(m_inputAdapters.begin(), m_inputAdapters.end(), [](const ClientInputAdapter* ptr) {
-            return ptr == nullptr;
-        });
-        std::string error_msg = "Input adapter has been pruned, make sure all 'subscribe' calls are connected to other edges or output adapters.";
-        if (!m_inputAdapters.empty() && null_ptr != m_inputAdapters.end()) {
-            auto bad_position = std::to_string(std::distance(m_inputAdapters.begin(), null_ptr));
-            CSP_THROW( ValueError, error_msg + " Subscribe call at index: " + bad_position + " has been pruned." );
-        }
         // maybe restart here?
         m_shouldRun = true;
         m_thread = std::make_unique<std::thread>([this]() {
@@ -122,6 +114,10 @@ void ClientAdapterManager::start(DateTime starttime, DateTime endtime) {
         });
     }
 };
+
+bool ClientAdapterManager::adapterPruned( size_t caller_id ){
+    return m_inputAdapters[caller_id] == nullptr;
+}
 
 void ClientAdapterManager::send(const std::string& value, const size_t& caller_id) {
     // Safety check for caller_id
@@ -607,7 +603,7 @@ OutputAdapter * ClientAdapterManager::getConnectionRequestAdapter( const Diction
     // std::unordered_set<std::string>& uriSet = target[caller_id];
     
     auto* adapter = m_engine->createOwnedObject<ClientConnectionRequestAdapter>(
-        this, m_ioc
+        this, m_ioc, is_subscribe, caller_id
     );
     m_connectionRequestAdapters.push_back(adapter);
     

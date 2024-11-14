@@ -19,7 +19,9 @@ public:
     ClientConnectionRequestAdapter(
         Engine * engine,
         ClientAdapterManager * clientAdapterManager,
-        net::io_context& ioc
+        net::io_context& ioc,
+        bool isSubscribe,
+        size_t callerId
     );
 
     void executeImpl() override;
@@ -29,6 +31,8 @@ public:
 private:
     [[maybe_unused]] ClientAdapterManager* m_clientAdapterManager;
     [[maybe_unused]] net::io_context& m_ioc;
+    bool m_isSubscribe;
+    size_t m_callerId;
 
 };
 
