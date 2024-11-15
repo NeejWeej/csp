@@ -240,9 +240,12 @@ class TestWebsocket:
                 ConnectionRequest,
                 [
                     (timedelta(), ConnectionRequest(uri="ws://localhost:8000/")),
-                    (timedelta(milliseconds=100), ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT)),
+                    (
+                        timedelta(milliseconds=100),
+                        ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT),
+                    ),
                     (timedelta(milliseconds=350), ConnectionRequest(uri="ws://localhost:8000/")),
-                ]
+                ],
             )
             const_conn_request = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
             val = csp.curve(int, [(timedelta(milliseconds=200), 0), (timedelta(milliseconds=500), 1)])

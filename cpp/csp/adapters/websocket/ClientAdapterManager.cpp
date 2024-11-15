@@ -37,9 +37,11 @@ ClientAdapterManager::ClientAdapterManager( Engine* engine, const Dictionary & p
 {
     auto input_size = static_cast<size_t>(properties.get<int64_t>("subscribe_calls"));
     m_inputAdapters.resize(input_size, nullptr);
+    m_subscribeFromUri.resize(input_size);
     // send_calls
     auto output_size = static_cast<size_t>(properties.get<int64_t>("send_calls"));
     m_outputAdapters.resize(output_size, nullptr);
+    m_sendToUri.resize(output_size);
 };
 
 ClientAdapterManager::~ClientAdapterManager()
@@ -589,15 +591,6 @@ OutputAdapter * ClientAdapterManager::getConnectionRequestAdapter( const Diction
 {
     auto caller_id = properties.get<int64_t>("caller_id");
     auto is_subscribe = properties.get<bool>("is_subscribe");
-    size_t validated_id = validateCallerId(caller_id); 
-    // Select the appropriate vector based on is_subscribe flag
-    std::vector<std::unordered_set<std::string>>& target = 
-        is_subscribe ? m_subscribeFromUri : m_sendToUri;
-    
-    // If caller_id is beyond current vector size, add new sets until we reach it
-    while (validated_id >= target.size()) {
-        target.emplace_back(); 
-    }
     
     // Get reference to the hash set for this caller_id
     // std::unordered_set<std::string>& uriSet = target[caller_id];
