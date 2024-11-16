@@ -38,7 +38,6 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
 void WebsocketEndpointManager::start(DateTime starttime, DateTime endtime) {
     // same as dynamic == True
     if( m_endpoint == nullptr ){
-        // We need to make sure none of the input adapters were pruned.
         // maybe restart here?
         m_shouldRun = true;
         m_thread = std::make_unique<std::thread>([this]() {
@@ -92,13 +91,20 @@ void WebsocketEndpointManager::start(DateTime starttime, DateTime endtime) {
         );
 
         m_thread = std::make_unique<std::thread>( [ this ]() { 
+            auto timeout = m_properties.get<TimeDelta>( "reconnect_interval" ).asSeconds();
             while( m_shouldRun )
             {
                 m_endpoint -> run();
                 m_ioc.run();
                 m_active = false;
                 m_ioc.reset();
-                if( m_shouldRun ) sleep( m_properties.get<TimeDelta>( "reconnect_interval" ) );
+                std::unique_lock<std::mutex> lock(m_mutex);
+                if (m_cv.wait_for(lock, 
+                    std::chrono::seconds( timeout ), 
+                    [this] { return !m_shouldRun; })) {
+                    // If condition variable returns true, it means we were signaled to stop
+                    break;
+                }
             }
         });
     }
@@ -516,6 +522,7 @@ void WebsocketEndpointManager::stop() {
         if( m_active ) m_endpoint->stop( false );
     }
     m_ioc.stop();
+    m_cv.notify_one();
     if( m_thread ) m_thread->join();
 };
 

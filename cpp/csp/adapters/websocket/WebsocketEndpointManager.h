@@ -17,6 +17,9 @@
 #include <csp/core/Platform.h>
 #include <thread>
 #include <chrono>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
 #include <iomanip>
 #include <iostream>
 #include <vector>
@@ -131,7 +134,9 @@ private:
     Engine* m_engine;
     ClientAdapterManager* m_mgr;
     [[maybe_unused]] bool m_active;
-    [[maybe_unused]] bool m_shouldRun;
+    [[maybe_unused]] std::atomic<bool> m_shouldRun{false};
+    std::mutex m_mutex;
+    std::condition_variable m_cv;
     std::unique_ptr<WebsocketEndpoint> m_endpoint;  // TODO remove
     [[maybe_unused]] ClientInputAdapter* m_inputAdapter;
     [[maybe_unused]] ClientOutputAdapter* m_outputAdapter;
