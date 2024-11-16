@@ -5,7 +5,7 @@ channels:
 dependencies:
  - bison
  - brotli
- - bump2version>=1
+ - bump-my-version
  - cmake
  - codespell>=2.2.6,<2.3
  - compilers
@@ -20,7 +20,7 @@ dependencies:
  - libarrow=16
  - libboost>=1.80.0
  - libboost-headers>=1.80.0
- - libprotobuf<5
+ - libprotobuf
  - librdkafka
  - lz4-c
  - mamba

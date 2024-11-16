@@ -26,9 +26,6 @@ build-debug:  ## build the library ( DEBUG ) - May need a make clean when switch
 build-conda:  ## build the library in Conda
 	python setup.py build build_ext --csp-no-vcpkg --inplace
 
-build-conda-debug:  ## build the library ( DEBUG ) - in Conda
-	SKBUILD_CONFIGURE_OPTIONS="" DEBUG=1 python setup.py build build_ext --csp-no-vcpkg --inplace
-
 install:  ## install library
 	python -m pip install .
 
@@ -127,16 +124,16 @@ dockerdown:  ## spin up docker compose services for adapter testing
 .PHONY: show-version patch minor major
 
 show-version:
-	@ bump2version --dry-run --allow-dirty pyproject.toml --list | grep current | awk -F= '{print $$2}'
+	@ bump-my-version show current_version
 
 patch:
-	bump2version patch
+	bump-my-version bump patch
 
 minor:
-	bump2version minor
+	bump-my-version bump minor
 
 major:
-	bump2version major
+	bump-my-version bump major
 
 ########
 # DIST #
