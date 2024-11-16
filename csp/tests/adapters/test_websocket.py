@@ -423,7 +423,7 @@ class TestWebsocket:
             # adapters, the websocket connection is not actually made.
             ws.send(csp.null_ts(str))
             assert ws._properties["port"] == "443"
-            stop_flag = csp.filter(csp.count(ws.status())==2,  ws.status())
+            stop_flag = csp.filter(csp.count(ws.status()) == 2, ws.status())
             csp.stop_engine(stop_flag)
 
         csp.run(g, starttime=datetime.now(pytz.UTC), realtime=True)
