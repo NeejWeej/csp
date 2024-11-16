@@ -315,38 +315,43 @@ class TestWebsocket:
 
         with tornado_server():
             # We do this to only spawn the tornado server once for both options
+            @csp.graph
+            def g(use_on_connect_payload: bool):
+                ws = WebsocketAdapterManager(dynamic=True)
+                if use_on_connect_payload:
+                    conn_request1 = csp.const(
+                        ConnectionRequest(uri="ws://localhost:8000/", on_connect_payload="hey world from 8000")
+                    )
+                    conn_request2 = csp.const(
+                        ConnectionRequest(uri="ws://localhost:8001/", on_connect_payload="hey world from 8001")
+                    )
+                else:
+                    conn_request1 = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
+                    conn_request2 = csp.const(ConnectionRequest(uri="ws://localhost:8001/"))
+                    status = ws.status()
+                    to_send = send_on_status(status, "ws://localhost:8000/", "hey world from 8000")
+                    to_send2 = send_on_status(status, "ws://localhost:8001/", "hey world from 8001")
+                    ws.send(to_send, connection_request=conn_request1)
+                    ws.send(to_send2, connection_request=conn_request2)
+
+                recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request1)
+                recv2 = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request2)
+
+                csp.add_graph_output("recv", recv)
+                csp.add_graph_output("recv2", recv2)
+
+                merged = csp.flatten([recv, recv2])
+                stop = csp.filter(csp.count(merged) == 2, merged)
+                csp.stop_engine(stop)
+
             for use_on_connect_payload in [True, False]:
-
-                @csp.graph
-                def g():
-                    ws = WebsocketAdapterManager(dynamic=True)
-                    if use_on_connect_payload:
-                        conn_request1 = csp.const(
-                            ConnectionRequest(uri="ws://localhost:8000/", on_connect_payload="hey world from 8000")
-                        )
-                        conn_request2 = csp.const(
-                            ConnectionRequest(uri="ws://localhost:8001/", on_connect_payload="hey world from 8001")
-                        )
-                    else:
-                        conn_request1 = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
-                        conn_request2 = csp.const(ConnectionRequest(uri="ws://localhost:8001/"))
-                        status = ws.status()
-                        to_send = send_on_status(status, "ws://localhost:8000/", "hey world from 8000")
-                        to_send2 = send_on_status(status, "ws://localhost:8001/", "hey world from 8001")
-                        ws.send(to_send, connection_request=conn_request1)
-                        ws.send(to_send2, connection_request=conn_request2)
-
-                    recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request1)
-                    recv2 = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_request2)
-
-                    csp.add_graph_output("recv", recv)
-                    csp.add_graph_output("recv2", recv2)
-
-                    merged = csp.flatten([recv, recv2])
-                    stop = csp.filter(csp.count(merged) == 2, merged)
-                    csp.stop_engine(stop)
-
-                msgs = csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=5), realtime=True)
+                msgs = csp.run(
+                    g,
+                    use_on_connect_payload,
+                    starttime=datetime.now(pytz.UTC),
+                    endtime=timedelta(seconds=5),
+                    realtime=True,
+                )
                 assert len(msgs["recv"]) == 1
                 assert msgs["recv"][0][1].msg == "hey world from 8000"
                 assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
@@ -402,6 +407,9 @@ class TestWebsocket:
         @csp.graph
         def g():
             ws = WebsocketAdapterManager("wss://localhost/")
+            # We need this since without any input or output
+            # adapters, the websocket connection is not actually made.
+            ws.send(csp.null_ts(str))
             assert ws._properties["port"] == "443"
             csp.stop_engine(ws.status())
 

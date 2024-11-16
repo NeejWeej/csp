@@ -12,13 +12,14 @@ namespace csp::adapters::websocket
 using namespace csp::autogen;
 
 class ClientAdapterManager;
+class WebsocketEndpointManager;
 
 class ClientConnectionRequestAdapter final: public OutputAdapter
 {
 public:
     ClientConnectionRequestAdapter(
         Engine * engine,
-        ClientAdapterManager * clientAdapterManager,
+        WebsocketEndpointManager * websocketManager,
         net::io_context& ioc,
         bool isSubscribe,
         size_t callerId
@@ -29,7 +30,7 @@ public:
     const char * name() const override { return "WebsocketClientConnectionRequestAdapter"; }
 
 private:
-    [[maybe_unused]] ClientAdapterManager* m_clientAdapterManager;
+    [[maybe_unused]] WebsocketEndpointManager* m_websocketManager;
     [[maybe_unused]] net::io_context& m_ioc;
     bool m_isSubscribe;
     size_t m_callerId;

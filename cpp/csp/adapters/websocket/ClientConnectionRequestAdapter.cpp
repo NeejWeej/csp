@@ -6,12 +6,12 @@ namespace csp::adapters::websocket {
 
 ClientConnectionRequestAdapter::ClientConnectionRequestAdapter(
     Engine * engine,
-    ClientAdapterManager * clientAdapterManager,
+    WebsocketEndpointManager * websocketManager,
     net::io_context& ioc,
     bool is_subscribe,
     size_t caller_id
 ) : OutputAdapter( engine ),  
-    m_clientAdapterManager( clientAdapterManager ),
+    m_websocketManager( websocketManager ),
     m_ioc( ioc),
     m_isSubscribe( is_subscribe ),
     m_callerId( caller_id )
@@ -19,7 +19,7 @@ ClientConnectionRequestAdapter::ClientConnectionRequestAdapter(
 
 void ClientConnectionRequestAdapter::executeImpl()
 {
-    if (m_isSubscribe && m_clientAdapterManager->adapterPruned(m_callerId)){
+    if (m_isSubscribe && m_websocketManager ->adapterPruned(m_callerId)){
         // If the corresponding adapter is an input adapter, there is a chance
         // it was pruned from the graph. In that case, this output adapter
         // would do nothing.
@@ -32,7 +32,7 @@ void ClientConnectionRequestAdapter::executeImpl()
     // Make a copy of the Dictionary, not just the pointer
     // Dictionary valueCopy = *val;  // Copy the actual dictionary
     boost::asio::post(m_ioc, [this, val=std::move(val)]() {
-        m_clientAdapterManager->handleConnectionRequest(val);
+        m_websocketManager -> handleConnectionRequest(val);
     });
 };
 

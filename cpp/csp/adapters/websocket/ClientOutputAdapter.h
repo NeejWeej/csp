@@ -11,6 +11,7 @@ namespace csp::adapters::websocket
 {
 
 class ClientAdapterManager;
+class WebsocketEndpointManager;
 
 class ClientOutputAdapter final: public OutputAdapter
 {
@@ -19,7 +20,7 @@ public:
     ClientOutputAdapter(
         Engine * engine,
         WebsocketEndpoint& endpoint,
-        ClientAdapterManager * clientAdapterManager,
+        WebsocketEndpointManager * websocketManager,
         size_t caller_id,
         net::io_context& ioc,
         bool dynamic
@@ -31,7 +32,7 @@ public:
 
 private:
     [[maybe_unused]] WebsocketEndpoint& m_endpoint;
-    ClientAdapterManager* m_clientAdapterManager;
+    WebsocketEndpointManager* m_websocketManager;
     size_t m_callerId;
     net::io_context& m_ioc;
     bool m_dynamic;

@@ -5,13 +5,13 @@ namespace csp::adapters::websocket {
 ClientOutputAdapter::ClientOutputAdapter(
     Engine * engine,
     WebsocketEndpoint& endpoint,
-    ClientAdapterManager * clientAdapterManager,
+    WebsocketEndpointManager * websocketManager,
     size_t caller_id,
     net::io_context& ioc,
     bool dynamic
 ) : OutputAdapter( engine ), 
     m_endpoint( endpoint ), 
-    m_clientAdapterManager( clientAdapterManager ),
+    m_websocketManager( websocketManager ),
     m_callerId( caller_id ),
     m_ioc( ioc ),
     m_dynamic( dynamic )
@@ -25,7 +25,7 @@ void ClientOutputAdapter::executeImpl()
     if( m_dynamic ){
         boost::asio::post(m_ioc, [this, value=value]() {
             // something something lifetime? Not sure
-            m_clientAdapterManager->send(value, m_callerId);
+            m_websocketManager->send(value, m_callerId);
         });
     }
     else{
