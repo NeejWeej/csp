@@ -248,7 +248,7 @@ class TestWebsocket:
                 ],
             )
             const_conn_request = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
-            val = csp.curve(int, [(timedelta(milliseconds=200), 0), (timedelta(milliseconds=500), 1)])
+            val = csp.curve(int, [(timedelta(milliseconds=100, microseconds=1), 0), (timedelta(milliseconds=500), 1)])
             hello = csp.apply(val, lambda x: f"hi world{x}", str)
 
             # We connect immediately and send out the hello message

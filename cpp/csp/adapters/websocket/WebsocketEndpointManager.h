@@ -93,14 +93,14 @@ public:
     bool adapterPruned( size_t caller_id );
     void start(DateTime starttime, DateTime endtime);
     void stop();
-    void handleConnectionRequest( const Dictionary & properties);
-    void setupOneOffConnection( const std::string& endpoint_id, const Dictionary& properties );
-    // void removeEndpoint(const std::string& id);
+    void handleConnectionRequest( const Dictionary & properties);    // void removeEndpoint(const std::string& id);
 
     void handleEndpointFailure(const std::string& endpoint_id, const std::string& reason, ClientStatusType status_type);
     void handleEndpointClosure(const std::string& endpoint_id);
-    void setupEndpoint(const std::string& endpoint_id, std::unique_ptr<WebsocketEndpoint> endpoint);
+    void setupEndpoint(const std::string& endpoint_id, std::unique_ptr<WebsocketEndpoint> endpoint, std::string payload, bool persist, bool is_consumer, size_t validated_id);
     void shutdownEndpoint(const std::string& endpoint_id);
+
+    void removeEndpointForCallerId(const std::string& endpoint_id, bool is_consumer, size_t validated_id);
 
     void ensureVectorSize(std::vector<bool>& vec, size_t caller_id);
 

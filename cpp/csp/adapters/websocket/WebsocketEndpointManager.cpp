@@ -148,101 +148,21 @@ void WebsocketEndpointManager::send(const std::string& value, const size_t& call
     }
 };
 
-void WebsocketEndpointManager::setupOneOffConnection(const std::string& endpoint_id, const Dictionary& properties) {
-    // This should only be called from thread running m_ioc
-    // This lets us avoid locking
-    auto caller_id = properties.get<int64_t>("caller_id");
-    size_t validated_id = validateCallerId(caller_id);
-    auto is_consumer = properties.get<bool>("is_subscribe");
-    auto payload = properties.get<std::string>("on_connect_payload");
-    
-    // First add them as consumer/producer so the endpoint stays alive 
-    if (is_consumer) {
-        addConsumer(endpoint_id, validated_id);
-    } else {
-        addProducer(endpoint_id, validated_id);
-    }
-
-    // If endpoint doesn't exist, create it
-    if (!m_endpoints.contains(endpoint_id)) {
-        auto ep = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
-        ep->setOnOpen([this, endpoint_id, payload, validated_id, is_consumer]() {
-            auto* endpoint = m_endpoints[endpoint_id].get();
-            m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully to " + endpoint_id );
-            // Send the payload
-            if (!payload.empty()) {
-                endpoint->send(payload);
-            }
-            
-            // Remove them and check if we should close endpoint
-            if (is_consumer) {
-                removeConsumer(endpoint_id, validated_id);
-            } else {
-                removeProducer(endpoint_id, validated_id);
-            }
-            
-            if (canRemoveEndpoint(endpoint_id)) {
-                shutdownEndpoint(endpoint_id);
-            }
-        });
-        
-        // Still need failure handling
-        ep->setOnFail([this, endpoint_id](const std::string& reason) {
-            handleEndpointFailure(endpoint_id, reason, ClientStatusType::CONNECTION_FAILED);
-        });
-        ep -> setOnMessage( []( void* c, size_t t ){} );
-        ep -> setOnClose(
-            [ this ]() {
-                m_active = false;
-                m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
-            }
-        );
-        ep -> setOnSendFail(
-            [ this, endpoint_id ]( const std::string& s ) {
-                std::stringstream ss;
-                ss << "Failed to send: " << s;
-                m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() + "for " + endpoint_id );
-            }
-        );
-        ep -> run();
-        m_endpoints[endpoint_id] = std::move(ep);
-        
-        // boost::asio::post(m_ioc, [this, endpoint_id, payload, validated_id, is_consumer, 
-        //                   ep = std::move(endpoint)]() mutable {
-        // });
-    } else {
-        // Endpoint exists, just send payload and disconnect
-        auto* endpoint = m_endpoints[endpoint_id].get();
-        if (!payload.empty()) {
-            endpoint->send(payload);
-            // Remove them and maybe close endpoint
-            if (is_consumer) {
-                removeConsumer(endpoint_id, validated_id);
-            } else {
-                removeProducer(endpoint_id, validated_id);
-            }
-            
-            if (canRemoveEndpoint(endpoint_id)) {
-                shutdownEndpoint(endpoint_id);
-            }
-            // boost::asio::post(m_ioc, [endpoint, payload, this, endpoint_id, 
-            //                   validated_id, is_consumer]() {
-            //     endpoint->send(payload);
-                
-            //     // Remove them and maybe close endpoint
-            //     if (is_consumer) {
-            //         removeConsumer(endpoint_id, validated_id);
-            //     } else {
-            //         removeProducer(endpoint_id, validated_id);
-            //     }
-                
-            //     if (canRemoveEndpoint(endpoint_id)) {
-            //         shutdownEndpoint(endpoint_id);
-            //     }
-            // });
+void WebsocketEndpointManager::removeEndpointForCallerId(const std::string& endpoint_id, bool is_consumer, size_t validated_id)
+{
+    // TODO
+    // Maybe inline?
+    if (auto config_it = m_endpoint_configs.find(endpoint_id); config_it != m_endpoint_configs.end()) {
+        if (is_consumer) {
+            WebsocketEndpointManager::removeConsumer(endpoint_id, validated_id);
+        } else {
+            WebsocketEndpointManager::removeProducer(endpoint_id, validated_id);
+        }
+        if (canRemoveEndpoint(endpoint_id)) {
+            shutdownEndpoint(endpoint_id);
         }
     }
-};
+}
 
 void WebsocketEndpointManager::shutdownEndpoint(const std::string& endpoint_id) {
     // This functions should only be called from the thread running
@@ -265,13 +185,17 @@ void WebsocketEndpointManager::shutdownEndpoint(const std::string& endpoint_id) 
 }
 
 void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id, 
-                                       std::unique_ptr<WebsocketEndpoint> endpoint) 
+                                            std::unique_ptr<WebsocketEndpoint> endpoint,
+                                            std::string payload, 
+                                            bool persist,
+                                            bool is_consumer,
+                                            size_t validated_id) 
 {
     // Store the endpoint first
     auto& stored_endpoint = m_endpoints[endpoint_id] = std::move(endpoint);
 
     // Do this directly to not get any issues with race conditions or something. Make this atomic
-    stored_endpoint->setOnOpen([this, endpoint_id, endpoint = stored_endpoint.get()]() {
+    stored_endpoint->setOnOpen([this, endpoint_id, endpoint = stored_endpoint.get(), payload=std::move(payload), persist, is_consumer, validated_id]() {
         auto [iter, inserted] = m_endpoint_configs.try_emplace(endpoint_id, m_ioc);
         auto& config = iter->second;
         config.attempting_reconnect = false;
@@ -293,9 +217,15 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
                 endpoint->send(config.producer_payloads[i]);
             }
         }
+        // should only happen if persist is False
+        if ( !payload.empty() )
+            endpoint -> send(payload);
         
         m_mgr -> pushStatus(StatusLevel::INFO, ClientStatusType::ACTIVE, 
                     "Connected successfully for endpoint " + endpoint_id);
+        // We remove the caller id, if it was the only one, then we shut down the endpoint
+        if( !persist )
+            removeEndpointForCallerId(endpoint_id, is_consumer, validated_id);
     });
 
     stored_endpoint->setOnFail([this, endpoint_id](const std::string& reason) {
@@ -321,6 +251,13 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
             }
         }
     });
+    stored_endpoint -> setOnSendFail(
+        [ this, endpoint_id ]( const std::string& s ) {
+            std::stringstream ss;
+            ss << "Failed to send: " << s;
+            m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() + "for " + endpoint_id );
+        }
+    );
     stored_endpoint -> run();
 };
 
@@ -389,60 +326,66 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
     switch(action.enum_value()) {
         case autogen::ActionType::enum_::CONNECT: {
             auto persistent = properties.get<bool>("persistent");
-            if (!persistent){
-                WebsocketEndpointManager::setupOneOffConnection(endpoint_id, properties);
-            }
-            else {
-                bool is_new_endpoint = !m_endpoints.contains(endpoint_id);
+            // if (!persistent){
+            //     WebsocketEndpointManager::setupOneOffConnection(endpoint_id, properties);
+            // }
+            // else {
+            bool is_new_endpoint = !m_endpoints.contains(endpoint_id);
 
-                auto reconnect_interval = properties.get<TimeDelta>("reconnect_interval");
-                // Update endpoint config
-                auto& config = m_endpoint_configs.try_emplace(endpoint_id, m_ioc).first->second;
+            auto reconnect_interval = properties.get<TimeDelta>("reconnect_interval");
+            // Update endpoint config
+            auto& config = m_endpoint_configs.try_emplace(endpoint_id, m_ioc).first->second;
 
-                config.reconnect_interval = std::chrono::milliseconds(
-                    reconnect_interval.asMilliseconds()
-                );
-                // Get payload if it exists
-                if (auto payload = properties.get<std::string>("on_connect_payload"); !payload.empty()) {
-                    auto& payloads = is_consumer ? config.consumer_payloads : config.producer_payloads;
-                    if (payloads.size() <= validated_id) {
-                        payloads.resize(validated_id + 1);
-                    }
-                    payloads[validated_id] = std::move(payload);
+            config.reconnect_interval = std::chrono::milliseconds(
+                reconnect_interval.asMilliseconds()
+            );
+            std::string payload;
+            bool has_payload = properties.tryGet<std::string>("on_connect_payload", payload);
+
+            if (has_payload && !payload.empty() && persistent) {
+                auto& payloads = is_consumer ? config.consumer_payloads : config.producer_payloads;
+                if (payloads.size() <= validated_id) {
+                    payloads.resize(validated_id + 1);
                 }
-                
-                if (is_consumer) {
-                    WebsocketEndpointManager::addConsumer(endpoint_id, validated_id);
-                } else {
-                    WebsocketEndpointManager::addProducer(endpoint_id, validated_id);
-                }
-                // TODO do we want to update hedaers on the other actions too?
-                // This makes a copy for now, maybe make it not do that?
-                // Do we want to update if persistent if false too?
-                if (is_new_endpoint) {
-                    auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
-                    endpoint -> updateHeaders(properties);
-                    WebsocketEndpointManager::setupEndpoint(endpoint_id, std::move(endpoint));
-                }
-                else{
-                    m_endpoints[endpoint_id]->updateHeaders(properties);
-                }
+                payloads[validated_id] = std::move(payload);  // Move to config
             }
+
+            if (is_consumer) {
+                WebsocketEndpointManager::addConsumer(endpoint_id, validated_id);
+            } else {
+                WebsocketEndpointManager::addProducer(endpoint_id, validated_id);
+            }
+
+            if (is_new_endpoint) {
+                auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
+                endpoint->updateHeaders(properties);
+                // We can safely move payload regardless - if it was never written to, it's just an empty string
+                WebsocketEndpointManager::setupEndpoint(endpoint_id, std::move(endpoint), 
+                                                    (has_payload && !payload.empty() && persistent) ? "" : std::move(payload),
+                                                    persistent, is_consumer, validated_id );
+            }
+            else{
+                if( !persistent && !payload.empty() )
+                    m_endpoints[endpoint_id]->send(payload);
+                m_endpoints[endpoint_id]->updateHeaders(properties);
+            }
+            // }
             break;
         }
         
         case csp::autogen::ActionType::enum_::DISCONNECT: {
             // Clear persistence flag for this caller
-            if (auto config_it = m_endpoint_configs.find(endpoint_id); config_it != m_endpoint_configs.end()) {
-                if (is_consumer) {
-                    WebsocketEndpointManager::removeConsumer(endpoint_id, validated_id);
-                } else {
-                    WebsocketEndpointManager::removeProducer(endpoint_id, validated_id);
-                }
-                if (canRemoveEndpoint(endpoint_id)) {
-                    shutdownEndpoint(endpoint_id);
-                }
-            }
+            removeEndpointForCallerId(endpoint_id, is_consumer, validated_id);
+            // if (auto config_it = m_endpoint_configs.find(endpoint_id); config_it != m_endpoint_configs.end()) {
+            //     if (is_consumer) {
+            //         WebsocketEndpointManager::removeConsumer(endpoint_id, validated_id);
+            //     } else {
+            //         WebsocketEndpointManager::removeProducer(endpoint_id, validated_id);
+            //     }
+            //     if (canRemoveEndpoint(endpoint_id)) {
+            //         shutdownEndpoint(endpoint_id);
+            //     }
+            // }
             break;
         }
         
