@@ -365,8 +365,10 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
                                                     persistent, is_consumer, validated_id );
             }
             else{
-                if( !persistent && !payload.empty() )
+                if( !persistent && !payload.empty() ){
                     m_endpoints[endpoint_id]->send(payload);
+                    removeEndpointForCallerId(endpoint_id, is_consumer, validated_id);
+                }
                 m_endpoints[endpoint_id]->updateHeaders(properties);
             }
             // }
@@ -376,16 +378,6 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
         case csp::autogen::ActionType::enum_::DISCONNECT: {
             // Clear persistence flag for this caller
             removeEndpointForCallerId(endpoint_id, is_consumer, validated_id);
-            // if (auto config_it = m_endpoint_configs.find(endpoint_id); config_it != m_endpoint_configs.end()) {
-            //     if (is_consumer) {
-            //         WebsocketEndpointManager::removeConsumer(endpoint_id, validated_id);
-            //     } else {
-            //         WebsocketEndpointManager::removeProducer(endpoint_id, validated_id);
-            //     }
-            //     if (canRemoveEndpoint(endpoint_id)) {
-            //         shutdownEndpoint(endpoint_id);
-            //     }
-            // }
             break;
         }
         
