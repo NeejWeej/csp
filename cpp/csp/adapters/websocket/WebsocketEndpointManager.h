@@ -104,7 +104,6 @@ public:
 
     void ensureVectorSize(std::vector<bool>& vec, size_t caller_id);
 
-    void ensureCallerVectorsSize(size_t caller_id);
     void addConsumer(const std::string& endpoint_id, size_t caller_id);
 
     void addProducer(const std::string& endpoint_id, size_t caller_id);

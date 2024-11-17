@@ -23,13 +23,23 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
         std::nullopt),
     m_dynamic( properties.get<bool>("dynamic") )
 {
+    // Total number of subscribe and send function calls, set on the adapter manager
+    // when is it created. Note, that some of the input adapters might have been
+    // pruned from the graph and won't get created.
     auto input_size = static_cast<size_t>(properties.get<int64_t>("subscribe_calls"));
     m_inputAdapters.resize(input_size, nullptr);
     m_subscribeFromUri.resize(input_size);
+    m_consumer_endpoints.resize(input_size);
     // send_calls
     auto output_size = static_cast<size_t>(properties.get<int64_t>("send_calls"));
     m_outputAdapters.resize(output_size, nullptr);
     m_sendToUri.resize(output_size);
+    m_producer_endpoints.resize(output_size);
+
+    // We choose to not automatically size m_connectionRequestAdapters
+    // since the index there is not meaningful,
+    // producers and subscribers are combined.
+    // We just hold onto their pointers.
 };
 
 // WebsocketEndpointManager::~WebsocketEndpointManager()
@@ -130,15 +140,17 @@ void WebsocketEndpointManager::send(const std::string& value, const size_t& call
             it != m_endpoints.end() && 
             caller_id < m_endpoint_producers[endpoint_id].size() && 
             m_endpoint_producers[endpoint_id][caller_id]) {
-            
-            boost::asio::post(m_ioc, [endpoint_id, value, ep = it->second.get()]() {
-                ep->send(value);
-            });
+            it->second.get()->send(value);
+            // boost::asio::post(m_ioc, [endpoint_id, value, ep = it->second.get()]() {
+            //     ep->send(value);
+            // });
         }
     }
 };
 
 void WebsocketEndpointManager::setupOneOffConnection(const std::string& endpoint_id, const Dictionary& properties) {
+    // This should only be called from thread running m_ioc
+    // This lets us avoid locking
     auto caller_id = properties.get<int64_t>("caller_id");
     size_t validated_id = validateCallerId(caller_id);
     auto is_consumer = properties.get<bool>("is_subscribe");
@@ -153,93 +165,103 @@ void WebsocketEndpointManager::setupOneOffConnection(const std::string& endpoint
 
     // If endpoint doesn't exist, create it
     if (!m_endpoints.contains(endpoint_id)) {
-        auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
-        
-        boost::asio::post(m_ioc, [this, endpoint_id, payload, validated_id, is_consumer, 
-                          ep = std::move(endpoint)]() mutable {
-            // Special onOpen for one-off: send payload and disconnect
-            ep->setOnOpen([this, endpoint_id, payload, validated_id, is_consumer]() {
-                auto* endpoint = m_endpoints[endpoint_id].get();
-                m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully to " + endpoint_id );
-                // Send the payload
-                if (!payload.empty()) {
-                    endpoint->send(payload);
-                }
-                
-                // Remove them and check if we should close endpoint
-                if (is_consumer) {
-                    removeConsumer(endpoint_id, validated_id);
-                } else {
-                    removeProducer(endpoint_id, validated_id);
-                }
-                
-                if (canRemoveEndpoint(endpoint_id)) {
-                    shutdownEndpoint(endpoint_id);
-                }
-            });
+        auto ep = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
+        ep->setOnOpen([this, endpoint_id, payload, validated_id, is_consumer]() {
+            auto* endpoint = m_endpoints[endpoint_id].get();
+            m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully to " + endpoint_id );
+            // Send the payload
+            if (!payload.empty()) {
+                endpoint->send(payload);
+            }
             
-            // Still need failure handling
-            ep->setOnFail([this, endpoint_id](const std::string& reason) {
-                handleEndpointFailure(endpoint_id, reason, ClientStatusType::CONNECTION_FAILED);
-            });
-            ep -> setOnMessage( []( void* c, size_t t ){} );
-            ep -> setOnClose(
-                [ this ]() {
-                    m_active = false;
-                    m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
-                }
-            );
-            ep -> setOnSendFail(
-                [ this, endpoint_id ]( const std::string& s ) {
-                    std::stringstream ss;
-                    ss << "Failed to send: " << s;
-                    m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() + "for " + endpoint_id );
-                }
-            );
-            ep -> run();
-            m_endpoints[endpoint_id] = std::move(ep);
+            // Remove them and check if we should close endpoint
+            if (is_consumer) {
+                removeConsumer(endpoint_id, validated_id);
+            } else {
+                removeProducer(endpoint_id, validated_id);
+            }
+            
+            if (canRemoveEndpoint(endpoint_id)) {
+                shutdownEndpoint(endpoint_id);
+            }
         });
+        
+        // Still need failure handling
+        ep->setOnFail([this, endpoint_id](const std::string& reason) {
+            handleEndpointFailure(endpoint_id, reason, ClientStatusType::CONNECTION_FAILED);
+        });
+        ep -> setOnMessage( []( void* c, size_t t ){} );
+        ep -> setOnClose(
+            [ this ]() {
+                m_active = false;
+                m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
+            }
+        );
+        ep -> setOnSendFail(
+            [ this, endpoint_id ]( const std::string& s ) {
+                std::stringstream ss;
+                ss << "Failed to send: " << s;
+                m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() + "for " + endpoint_id );
+            }
+        );
+        ep -> run();
+        m_endpoints[endpoint_id] = std::move(ep);
+        
+        // boost::asio::post(m_ioc, [this, endpoint_id, payload, validated_id, is_consumer, 
+        //                   ep = std::move(endpoint)]() mutable {
+        // });
     } else {
         // Endpoint exists, just send payload and disconnect
         auto* endpoint = m_endpoints[endpoint_id].get();
         if (!payload.empty()) {
-            boost::asio::post(m_ioc, [endpoint, payload, this, endpoint_id, 
-                              validated_id, is_consumer]() {
-                endpoint->send(payload);
+            endpoint->send(payload);
+            // Remove them and maybe close endpoint
+            if (is_consumer) {
+                removeConsumer(endpoint_id, validated_id);
+            } else {
+                removeProducer(endpoint_id, validated_id);
+            }
+            
+            if (canRemoveEndpoint(endpoint_id)) {
+                shutdownEndpoint(endpoint_id);
+            }
+            // boost::asio::post(m_ioc, [endpoint, payload, this, endpoint_id, 
+            //                   validated_id, is_consumer]() {
+            //     endpoint->send(payload);
                 
-                // Remove them and maybe close endpoint
-                if (is_consumer) {
-                    removeConsumer(endpoint_id, validated_id);
-                } else {
-                    removeProducer(endpoint_id, validated_id);
-                }
+            //     // Remove them and maybe close endpoint
+            //     if (is_consumer) {
+            //         removeConsumer(endpoint_id, validated_id);
+            //     } else {
+            //         removeProducer(endpoint_id, validated_id);
+            //     }
                 
-                if (canRemoveEndpoint(endpoint_id)) {
-                    shutdownEndpoint(endpoint_id);
-                }
-            });
+            //     if (canRemoveEndpoint(endpoint_id)) {
+            //         shutdownEndpoint(endpoint_id);
+            //     }
+            // });
         }
     }
 };
 
 void WebsocketEndpointManager::shutdownEndpoint(const std::string& endpoint_id) {
-    boost::asio::post(m_ioc, [this, endpoint_id]() {
-        // Cancel any pending reconnection attempts
-        if (auto config_it = m_endpoint_configs.find(endpoint_id); 
-            config_it != m_endpoint_configs.end()) {
-            config_it->second.reconnect_timer->cancel();
-            // This won't have us revive on the onFail callback
-            config_it->second.shutting_down = true;
-            m_endpoint_configs.erase(config_it);
-        }
-        
-        // Stop and remove the endpoint
-        if (auto endpoint_it = m_endpoints.find(endpoint_id); 
-            endpoint_it != m_endpoints.end()) {
-            endpoint_it->second->stop( false );
-            m_endpoints.erase(endpoint_it);
-        }
-    });
+    // This functions should only be called from the thread running
+    // m_ioc
+    // Cancel any pending reconnection attempts
+    if (auto config_it = m_endpoint_configs.find(endpoint_id); 
+        config_it != m_endpoint_configs.end()) {
+        config_it->second.reconnect_timer->cancel();
+        // This won't have us revive on the onFail callback
+        config_it->second.shutting_down = true;
+        m_endpoint_configs.erase(config_it);
+    }
+    
+    // Stop and remove the endpoint
+    if (auto endpoint_it = m_endpoints.find(endpoint_id); 
+        endpoint_it != m_endpoints.end()) {
+        endpoint_it->second->stop( false );
+        m_endpoints.erase(endpoint_it);
+    }
 }
 
 void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id, 
@@ -316,26 +338,24 @@ void WebsocketEndpointManager::handleEndpointFailure(const std::string& endpoint
             // Schedule reconnection attempt
             config.reconnect_timer->expires_after(config.reconnect_interval);
             config.reconnect_timer->async_wait([this, endpoint_id](const error_code& ec) {
-                boost::asio::post(m_ioc, [this, endpoint_id]() {
-                    if (auto it = m_endpoints.find(endpoint_id); 
-                        it != m_endpoints.end()) {
-                        auto config_it = m_endpoint_configs.find(endpoint_id);
-                        if (config_it != m_endpoint_configs.end()) {
-                            auto& config = config_it -> second;
-                            config.attempting_reconnect = false;
-                        }
-                        it->second->run();  // Attempt to reconnect
-                        // Could this have been deleted??
+                // boost::asio::post(m_ioc, [this, endpoint_id]() {
+                // If we still want to subscribe to this endpoint
+                if (auto it = m_endpoints.find(endpoint_id); 
+                    it != m_endpoints.end()) {
+                    auto config_it = m_endpoint_configs.find(endpoint_id);
+                    if (config_it != m_endpoint_configs.end()) {
+                        auto& config = config_it -> second;
+                        // We are no longer attempting to reconnect
+                        config.attempting_reconnect = false;
                     }
-                });
+                    it->second->run();  // Attempt to reconnect
+                }
             });
         }
     } else {
         // No active consumers/producers, clean up the endpoint
-        boost::asio::post(m_ioc, [this, endpoint_id]() {
-            m_endpoints.erase(endpoint_id);
-            m_endpoint_configs.erase(endpoint_id);
-        });
+        m_endpoints.erase(endpoint_id);
+        m_endpoint_configs.erase(endpoint_id);
     }
     
     std::stringstream ss;
@@ -357,6 +377,9 @@ void WebsocketEndpointManager::handleEndpointClosure(const std::string& endpoint
 
 void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & properties)
 {
+    // This should only get called from the thread running
+    // m_ioc. This allows us to avoid locks on internal data
+    // structures
     auto endpoint_id = properties.get<std::string>("uri");
     auto caller_id = properties.get<int64_t>("caller_id");
     size_t validated_id = validateCallerId(caller_id);
@@ -431,9 +454,7 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
             if ( ( is_consumer && validated_id < consumers.size() && consumers[validated_id] ) || 
                 ( !is_consumer && validated_id < producers.size() && producers[validated_id] ) ) {
                     if (auto it = m_endpoints.find(endpoint_id); it != m_endpoints.end()) {
-                        boost::asio::post(m_ioc, [ep = it->second.get()]() {
-                            ep->ping();
-                        });
+                        it->second.get()->ping();
                     }
             }
             break;
@@ -448,28 +469,17 @@ void WebsocketEndpointManager::ensureVectorSize(std::vector<bool>& vec, size_t c
     }
 };
 
-void WebsocketEndpointManager::ensureCallerVectorsSize(size_t caller_id) {
-    if (m_consumer_endpoints.size() <= caller_id) {
-        m_consumer_endpoints.resize(caller_id + 1);
-    }
-    if (m_producer_endpoints.size() <= caller_id) {
-        m_producer_endpoints.resize(caller_id + 1);
-    }
-};
-
 void WebsocketEndpointManager::addConsumer(const std::string& endpoint_id, size_t caller_id) {
     ensureVectorSize(m_endpoint_consumers[endpoint_id], caller_id);
     m_endpoint_consumers[endpoint_id][caller_id] = true;
-    
-    ensureCallerVectorsSize(caller_id);
+
     m_consumer_endpoints[caller_id].insert(endpoint_id);
 };
 
 void WebsocketEndpointManager::addProducer(const std::string& endpoint_id, size_t caller_id) {
     ensureVectorSize(m_endpoint_producers[endpoint_id], caller_id);
     m_endpoint_producers[endpoint_id][caller_id] = true;
-    
-    ensureCallerVectorsSize(caller_id);
+
     m_producer_endpoints[caller_id].insert(endpoint_id);
 };
 
@@ -484,39 +494,46 @@ bool WebsocketEndpointManager::canRemoveEndpoint(const std::string& endpoint_id)
 
 void WebsocketEndpointManager::removeConsumer(const std::string& endpoint_id, size_t caller_id) {
     auto& consumers = m_endpoint_consumers[endpoint_id];
+    // Possibility it might not be subscribed,
+    // so we have this check.
     if (caller_id < consumers.size()) {
         consumers[caller_id] = false;
     }
-    
-    if (caller_id < m_consumer_endpoints.size()) {
-        m_consumer_endpoints[caller_id].erase(endpoint_id);
-    }
+    // We initialize these upfront, this will be valid.
+    m_consumer_endpoints[caller_id].erase(endpoint_id);
 };
 
 void WebsocketEndpointManager::removeProducer(const std::string& endpoint_id, size_t caller_id) {
     auto& producers = m_endpoint_producers[endpoint_id];
+    // Possibility it might not be publihsing to
+    // so we have this check.
     if (caller_id < producers.size()) {
         producers[caller_id] = false;
     }
     
-    if (caller_id < m_producer_endpoints.size()) {
-        m_producer_endpoints[caller_id].erase(endpoint_id);
-    }
+    // We initialize these upfront, this will be valid.
+    m_producer_endpoints[caller_id].erase(endpoint_id);
 };
 
 
 void WebsocketEndpointManager::stop() {
     m_shouldRun=false;
     if( m_dynamic ){
+        // Stop all endpoints
+        // Endpoints running on m_ioc thread,
+        // So we call stop there
+        boost::asio::post(m_ioc, [this]() {
+            for (auto& [endpoint_id, _] : m_endpoints) {
+                // TODO ponder
+                // Since this is called from the main thread,
+                // We post to the m_ioc thread
+                shutdownEndpoint(endpoint_id);
+                // endpoint->stop();
+            }
+        });
         // Stop the work guard to allow the io_context to complete
         if (m_work_guard )
             m_work_guard.reset();
-        
-        // Stop all endpoints
-        for (auto& [endpoint_id, _] : m_endpoints) {
-            shutdownEndpoint(endpoint_id);
-            // endpoint->stop();
-        }
     }
     else{
         if( m_active ) m_endpoint->stop( false );
@@ -581,9 +598,6 @@ OutputAdapter * WebsocketEndpointManager::getConnectionRequestAdapter( const Dic
 {
     auto caller_id = properties.get<int64_t>("caller_id");
     auto is_subscribe = properties.get<bool>("is_subscribe");
-    
-    // Get reference to the hash set for this caller_id
-    // std::unordered_set<std::string>& uriSet = target[caller_id];
     
     auto* adapter = m_engine->createOwnedObject<ClientConnectionRequestAdapter>(
         this, m_ioc, is_subscribe, caller_id

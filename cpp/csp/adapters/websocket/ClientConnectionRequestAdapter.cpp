@@ -27,10 +27,10 @@ void ClientConnectionRequestAdapter::executeImpl()
     }
     auto raw_val = input() -> lastValueTyped<PyObject*>();
     Dictionary val = python::fromPython<Dictionary>( raw_val );
-    // Dictionary val = Dictionary( python::fromPython<Dictionary>( raw_val )) ;
-    // std::cout << "WE GOT A DICT" << "\n";
-    // Make a copy of the Dictionary, not just the pointer
-    // Dictionary valueCopy = *val;  // Copy the actual dictionary
+    // We intentionally post here, we want the thread running
+    // m_ioc to handle the connection request. We want to keep
+    // all updates to internal data structures at graph run-time
+    // to that thread.
     boost::asio::post(m_ioc, [this, val=std::move(val)]() {
         m_websocketManager -> handleConnectionRequest(val);
     });
