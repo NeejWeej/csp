@@ -152,16 +152,15 @@ void WebsocketEndpointManager::removeEndpointForCallerId(const std::string& endp
 {
     // TODO
     // Maybe inline?
-    if (auto config_it = m_endpoint_configs.find(endpoint_id); config_it != m_endpoint_configs.end()) {
-        if (is_consumer) {
-            WebsocketEndpointManager::removeConsumer(endpoint_id, validated_id);
-        } else {
-            WebsocketEndpointManager::removeProducer(endpoint_id, validated_id);
-        }
-        if (canRemoveEndpoint(endpoint_id)) {
-            shutdownEndpoint(endpoint_id);
-        }
+    // if (auto config_it = m_endpoint_configs.find(endpoint_id); config_it != m_endpoint_configs.end()) {
+    if (is_consumer) {
+        WebsocketEndpointManager::removeConsumer(endpoint_id, validated_id);
+    } else {
+        WebsocketEndpointManager::removeProducer(endpoint_id, validated_id);
     }
+    if (canRemoveEndpoint(endpoint_id))
+        shutdownEndpoint(endpoint_id);
+    // }
 }
 
 void WebsocketEndpointManager::shutdownEndpoint(const std::string& endpoint_id) {
@@ -312,16 +311,13 @@ void WebsocketEndpointManager::handleEndpointClosure(const std::string& endpoint
     }
 };
 
-void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & properties)
+void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & properties, size_t validated_id, bool is_subscribe)
 {
     // This should only get called from the thread running
     // m_ioc. This allows us to avoid locks on internal data
     // structures
     auto endpoint_id = properties.get<std::string>("uri");
-    auto caller_id = properties.get<int64_t>("caller_id");
-    size_t validated_id = validateCallerId(caller_id);
     autogen::ActionType action = autogen::ActionType::create( properties.get<std::string>("action") );
-    auto is_consumer = properties.get<bool>("is_subscribe");
     // Change headers if needed here!
     switch(action.enum_value()) {
         case autogen::ActionType::enum_::CONNECT: {
@@ -343,32 +339,33 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
             bool has_payload = properties.tryGet<std::string>("on_connect_payload", payload);
 
             if (has_payload && !payload.empty() && persistent) {
-                auto& payloads = is_consumer ? config.consumer_payloads : config.producer_payloads;
+                auto& payloads = is_subscribe ? config.consumer_payloads : config.producer_payloads;
                 if (payloads.size() <= validated_id) {
                     payloads.resize(validated_id + 1);
                 }
                 payloads[validated_id] = std::move(payload);  // Move to config
             }
 
-            if (is_consumer) {
-                WebsocketEndpointManager::addConsumer(endpoint_id, validated_id);
-            } else {
-                WebsocketEndpointManager::addProducer(endpoint_id, validated_id);
+            if ( persistent ){
+                if (is_subscribe) {
+                    WebsocketEndpointManager::addConsumer(endpoint_id, validated_id);
+                } else {
+                    WebsocketEndpointManager::addProducer(endpoint_id, validated_id);
+                }
             }
 
             if (is_new_endpoint) {
                 auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
-                endpoint->updateHeaders(properties);
                 // We can safely move payload regardless - if it was never written to, it's just an empty string
                 WebsocketEndpointManager::setupEndpoint(endpoint_id, std::move(endpoint), 
                                                     (has_payload && !payload.empty() && persistent) ? "" : std::move(payload),
-                                                    persistent, is_consumer, validated_id );
+                                                    persistent, is_subscribe, validated_id );
             }
             else{
-                if( !persistent && !payload.empty() ){
+                if( !persistent && !payload.empty() )
                     m_endpoints[endpoint_id]->send(payload);
-                    removeEndpointForCallerId(endpoint_id, is_consumer, validated_id);
-                }
+                // Conscious decision to let non-persisten connection
+                // results to update the header
                 m_endpoints[endpoint_id]->updateHeaders(properties);
             }
             // }
@@ -377,7 +374,7 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
         
         case csp::autogen::ActionType::enum_::DISCONNECT: {
             // Clear persistence flag for this caller
-            removeEndpointForCallerId(endpoint_id, is_consumer, validated_id);
+            removeEndpointForCallerId(endpoint_id, is_subscribe, validated_id);
             break;
         }
         
@@ -386,21 +383,14 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
             auto& consumers = m_endpoint_consumers[endpoint_id];
             auto& producers = m_endpoint_producers[endpoint_id];
 
-            if ( ( is_consumer && validated_id < consumers.size() && consumers[validated_id] ) || 
-                ( !is_consumer && validated_id < producers.size() && producers[validated_id] ) ) {
+            if ( ( is_subscribe && validated_id < consumers.size() && consumers[validated_id] ) || 
+                ( !is_subscribe && validated_id < producers.size() && producers[validated_id] ) ) {
                     if (auto it = m_endpoints.find(endpoint_id); it != m_endpoints.end()) {
                         it->second.get()->ping();
                     }
             }
             break;
         }
-    }
-};
-
-
-void WebsocketEndpointManager::ensureVectorSize(std::vector<bool>& vec, size_t caller_id) {
-    if (vec.size() <= caller_id) {
-        vec.resize(caller_id + 1, false);
     }
 };
 

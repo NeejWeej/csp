@@ -21,6 +21,7 @@ from csp.impl.wiring import input_adapter_def, output_adapter_def, status_adapte
 from csp.impl.wiring.delayed_node import DelayedNodeWrapperDef
 from csp.lib import _websocketadapterimpl
 
+from .dynamic_adapter_utils import AdapterInfo
 from .websocket_types import ActionType, ConnectionRequest, WebsocketHeaderUpdate, WebsocketStatus  # noqa
 
 # InternalConnectionRequest,
@@ -510,18 +511,14 @@ class WebsocketAdapterManager:
         # TODO: ADD on_connect_payload option
         return res
 
-    @csp.node
-    def _enrich_with_caller_id(
-        self,
-        connection_request: ts[ConnectionRequest],
-        caller_id: int,
-        is_subscribe: bool,
-    ) -> ts[dict]:
-        if csp.ticked(connection_request):
-            conn_prop = self._get_properties(connection_request)
-            conn_prop["caller_id"] = caller_id
-            conn_prop["is_subscribe"] = is_subscribe
-            return conn_prop
+    def _get_caller_id(self, is_subscribe: bool) -> int:
+        if is_subscribe:
+            caller_id = self._subscribe_call_id
+            self._subscribe_call_id += 1
+        else:
+            caller_id = self._send_call_id
+            self._send_call_id += 1
+        return caller_id
 
     def get_wrapper_struct(self, ts_type: type):
         if (dynamic_type := self._wrapper_struct_dict.get(ts_type)) is None:
@@ -553,15 +550,24 @@ class WebsocketAdapterManager:
         ts_type should be original type!! The tuple wrapping happens
         automatically
         """
-        caller_id = self._subscribe_call_id
-        self._subscribe_call_id += 1
-        if connection_request is None:
-            connection_request = csp.null_ts(ConnectionRequest)
-        elif not self._dynamic:
-            raise ValueError("ConnectionRequests must be None when dynamic is False")
+        caller_id = self._get_caller_id(is_subscribe=True)
+        # Gives validation, more to start defining a common interface
+        adapter_props = AdapterInfo(caller_id=caller_id, is_subscribe=True).model_dump()
+        if connection_request is None and self._dynamic:
+            raise ValueError(
+                "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
+            )
 
-        # Only relevant for dynamic mode
-        adapter_props = {"caller_id": caller_id, "is_subscribe": True, "dynamic": self._dynamic}
+        if connection_request is not None:
+            # request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
+            request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
+            # We just declare it here, so it gets included in the graph
+            # since nothing is returned.
+            # csp.print("req dict", request_dict)
+            _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
+            # If in dynamic mode, we wrap the message in a struct to include the url the data
+            # is coming from
+
         field_map = field_map or {}
         meta_field_map = meta_field_map or {}
         if isinstance(field_map, str):
@@ -575,35 +581,27 @@ class WebsocketAdapterManager:
         properties["meta_field_map"] = meta_field_map
 
         properties.update(adapter_props)
-
         if self._dynamic:
-            request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
-            # We just declare it here, so it gets included in the graph
-            # since nothing is returned.
-            # csp.print("req dict", request_dict)
-            _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
-            # We wrap the return type in a struct, to mark messages with the url they come from
             ts_type = self.get_wrapper_struct(ts_type=ts_type)
-
         return _websocket_input_adapter_def(self, ts_type, properties, push_mode=push_mode)
 
     def send(self, x: ts["T"], connection_request: Optional[ts[ConnectionRequest]] = None):
-        caller_id = self._send_call_id
-        self._send_call_id += 1
-        request_dict = {}
+        caller_id = self._get_caller_id(is_subscribe=False)
+        # Gives validation, more to start defining a common interface
+        adapter_props = AdapterInfo(caller_id=caller_id, is_subscribe=False).model_dump()
+        if connection_request is None and self._dynamic:
+            raise ValueError(
+                "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
+            )
 
-        if connection_request is None:
-            connection_request = csp.null_ts(ConnectionRequest)
-        elif not self._dynamic:
-            raise ValueError("ConnectionRequests must be None when dynamic is False")
-
-        adapter_props = {"caller_id": caller_id, "is_subscribe": False, "dynamic": self._dynamic}
-        if self._dynamic:
-            request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=False)
+        # TODO:
+        # Consider allowing header updates go through here
+        # In non-dynamic mode
+        if connection_request is not None:
+            request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
             # We just declare it here, so it gets included in the graph
             # since nothing is returned.
             _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
-
         return _websocket_output_adapter_def(self, x, adapter_props)
 
     def update_headers(self, x: ts[List[WebsocketHeaderUpdate]]):
@@ -620,9 +618,7 @@ class WebsocketAdapterManager:
 
     def _create(self, engine, memo):
         """method needs to return the wrapped c++ adapter manager"""
-        subscribe_and_send_calls = {"subscribe_calls": self._subscribe_call_id, "send_calls": self._send_call_id}
-        # TODO: Make this better, maybe use properties
-        self._properties.update(subscribe_and_send_calls)
+        self._properties.update({"subscribe_calls": self._subscribe_call_id, "send_calls": self._send_call_id})
         return _websocketadapterimpl._websocket_adapter_manager(engine, self._properties)
 
 

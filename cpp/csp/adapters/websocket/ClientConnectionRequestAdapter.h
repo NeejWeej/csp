@@ -34,6 +34,8 @@ private:
     [[maybe_unused]] net::io_context& m_ioc;
     bool m_isSubscribe;
     size_t m_callerId;
+    bool m_checkPerformed;
+    bool m_isPruned{false};
 
 };
 

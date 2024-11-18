@@ -93,7 +93,7 @@ public:
     bool adapterPruned( size_t caller_id );
     void start(DateTime starttime, DateTime endtime);
     void stop();
-    void handleConnectionRequest( const Dictionary & properties);    // void removeEndpoint(const std::string& id);
+    void handleConnectionRequest(const Dictionary & properties, size_t validated_id, bool is_subscribe);
 
     void handleEndpointFailure(const std::string& endpoint_id, const std::string& reason, ClientStatusType status_type);
     void handleEndpointClosure(const std::string& endpoint_id);
@@ -101,8 +101,6 @@ public:
     void shutdownEndpoint(const std::string& endpoint_id);
 
     void removeEndpointForCallerId(const std::string& endpoint_id, bool is_consumer, size_t validated_id);
-
-    void ensureVectorSize(std::vector<bool>& vec, size_t caller_id);
 
     void addConsumer(const std::string& endpoint_id, size_t caller_id);
 
@@ -125,6 +123,11 @@ private:
             CSP_THROW(ValueError, "caller_id cannot be negative: " << caller_id);
         }
         return static_cast<size_t>(caller_id);
+    }
+    inline void ensureVectorSize(std::vector<bool>& vec, size_t caller_id) {
+        if (vec.size() <= caller_id) {
+            vec.resize(caller_id + 1, false);
+        }
     }
     using UriInfo = std::tuple<int32_t, std::unordered_set<uint64_t>>; //TODO remove
     using OptWorkGuard = std::optional<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>;
