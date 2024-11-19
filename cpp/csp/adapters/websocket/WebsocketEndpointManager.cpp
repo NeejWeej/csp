@@ -18,9 +18,10 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
     m_updateAdapter( nullptr ),
     m_thread( nullptr ), 
     m_properties( properties ),
-    m_work_guard(properties.get<bool>("dynamic") ? 
-        std::make_optional(boost::asio::make_work_guard(m_ioc)) : 
-        std::nullopt),
+    m_work_guard(std::make_optional(boost::asio::make_work_guard(m_ioc))),
+    // m_work_guard(properties.get<bool>("dynamic") ? 
+    //     std::make_optional(boost::asio::make_work_guard(m_ioc)) : 
+    //     std::nullopt),
     m_dynamic( properties.get<bool>("dynamic") )
 {
     // Total number of subscribe and send function calls, set on the adapter manager
@@ -46,78 +47,97 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
 // { };
 
 void WebsocketEndpointManager::start(DateTime starttime, DateTime endtime) {
-    // same as dynamic == True
-    if( m_endpoint == nullptr ){
         // maybe restart here?
-        m_shouldRun = true;
-        m_thread = std::make_unique<std::thread>([this]() {
-            m_ioc.reset();
-            m_ioc.run();
-        });
-    }
-    else {
-        // Don't use a work guard here
-        // TODO maybe use a work guard here
-        // m_work_guard.reset();
-        m_shouldRun = true;
-        m_endpoint -> setOnOpen(
-            [ this ]() {
-                m_active = true;
-                m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully" );
-            }
-        );
-        m_endpoint -> setOnFail(
-            [ this ]( const std::string& reason ) {
-                std::stringstream ss;
-                ss << "Connection Failure: " << reason;
-                m_active = false;
-                m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::CONNECTION_FAILED, ss.str() );
-            } 
-        );
-        if( m_inputAdapter ) {
-            m_endpoint -> setOnMessage(
-                [ this ]( void* c, size_t t ) {
-                    PushBatch batch( m_engine -> rootEngine() );
-                    m_inputAdapter -> processMessage( c, t, &batch );
-                }
-            );
-        } else {
-            // if a user doesn't call WebsocketAdapterManager.subscribe, no inputadapter will be created
-            // but we still need something to avoid on_message_cb not being set in the endpoint.
-            m_endpoint -> setOnMessage( []( void* c, size_t t ){} );
+    m_shouldRun = true;
+    m_thread = std::make_unique<std::thread>([this]() {
+        m_ioc.reset();
+        if( !m_dynamic ){
+            boost::asio::post(m_ioc, [this]() {
+                // We subscribe for both the subscribe and send calls
+                // But we probably should check here.
+                if( m_outputAdapters.size() == 1)
+                    handleConnectionRequest(Dictionary(m_properties), 0, false);
+                // // If we have an input adapter call AND it's not pruned.
+                if( m_inputAdapters.size() == 1 && !adapterPruned(0))
+                    handleConnectionRequest(Dictionary(m_properties), 0, true);
+            });
         }
-        m_endpoint -> setOnClose(
-            [ this ]() {
-                m_active = false;
-                m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
-            }
-        );
-        m_endpoint -> setOnSendFail(
-            [ this ]( const std::string& s ) {
-                std::stringstream ss;
-                ss << "Failed to send: " << s;
-                m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() );
-            }
-        );
+        m_ioc.run();
+    });
+    // if( m_dynamic ){
+    //     // maybe restart here?
+    //     m_shouldRun = true;
+    //     m_thread = std::make_unique<std::thread>([this]() {
+    //         m_ioc.reset();
+    //         if( m_dynamic ){
 
-        m_thread = std::make_unique<std::thread>( [ this ]() { 
-            auto timeout = m_properties.get<TimeDelta>( "reconnect_interval" ).asSeconds();
-            while( m_shouldRun )
-            {
-                m_endpoint -> run();
-                m_ioc.run();
-                m_active = false;
-                m_ioc.reset();
-                std::unique_lock<std::mutex> lock(m_mutex);
-                if (m_cv.wait_for(lock, 
-                    std::chrono::seconds( timeout ), 
-                    [this] { return !m_shouldRun; })) {
-                    // If condition variable returns true, it means we were signaled to stop
-                    break;
-                }
-            }
-        });
-    }
+    //         }
+    //         m_ioc.run();
+    //     });
+    // }
+    // else {
+    //     // Don't use a work guard here
+    //     // TODO maybe use a work guard here
+    //     // m_work_guard.reset();
+    //     m_shouldRun = true;
+    //     m_endpoint -> setOnOpen(
+    //         [ this ]() {
+    //             m_active = true;
+    //             m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully" );
+    //         }
+    //     );
+    //     m_endpoint -> setOnFail(
+    //         [ this ]( const std::string& reason ) {
+    //             std::stringstream ss;
+    //             ss << "Connection Failure: " << reason;
+    //             m_active = false;
+    //             m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::CONNECTION_FAILED, ss.str() );
+    //         } 
+    //     );
+    //     if( m_inputAdapter ) {
+    //         m_endpoint -> setOnMessage(
+    //             [ this ]( void* c, size_t t ) {
+    //                 PushBatch batch( m_engine -> rootEngine() );
+    //                 m_inputAdapter -> processMessage( c, t, &batch );
+    //             }
+    //         );
+    //     } else {
+    //         // if a user doesn't call WebsocketAdapterManager.subscribe, no inputadapter will be created
+    //         // but we still need something to avoid on_message_cb not being set in the endpoint.
+    //         m_endpoint -> setOnMessage( []( void* c, size_t t ){} );
+    //     }
+    //     m_endpoint -> setOnClose(
+    //         [ this ]() {
+    //             m_active = false;
+    //             m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
+    //         }
+    //     );
+    //     m_endpoint -> setOnSendFail(
+    //         [ this ]( const std::string& s ) {
+    //             std::stringstream ss;
+    //             ss << "Failed to send: " << s;
+    //             m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() );
+    //         }
+    //     );
+
+    //     m_thread = std::make_unique<std::thread>( [ this ]() { 
+    //         auto timeout = m_properties.get<TimeDelta>( "reconnect_interval" ).asSeconds();
+    //         while( m_shouldRun )
+    //         {
+    //             m_endpoint -> run();
+    //             m_ioc.run();
+    //             m_active = false;
+    //             m_ioc.reset();
+    //             std::unique_lock<std::mutex> lock(m_mutex);
+    //             if (m_cv.wait_for(lock, 
+    //                 std::chrono::seconds( timeout ), 
+    //                 [this] { return !m_shouldRun; })) {
+    //                 // If condition variable returns true, it means we were signaled to stop
+    //                 break;
+    //             }
+    //         }
+    //     });
+    // }
 };
 
 bool WebsocketEndpointManager::adapterPruned( size_t caller_id ){
@@ -191,6 +211,9 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
                                             size_t validated_id) 
 {
     // Store the endpoint first
+    // std::cout << "INSIDE SETUPENDPOINT \n";
+    // m_endpoints[endpoint_id] = std::move(endpoint);
+
     auto& stored_endpoint = m_endpoints[endpoint_id] = std::move(endpoint);
 
     // Do this directly to not get any issues with race conditions or something. Make this atomic
@@ -199,6 +222,7 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
         auto& config = iter->second;
         config.attempting_reconnect = false;
         
+        // std::cout << "WE OPENED!!" << persist <<" " << is_consumer << " " <<validated_id << "\n";
         // Send consumer payloads
         const auto& consumers = m_endpoint_consumers[endpoint_id];
         for (size_t i = 0; i < config.consumer_payloads.size(); ++i) {
@@ -237,7 +261,7 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
     stored_endpoint->setOnMessage([this, endpoint_id](void* data, size_t len) {
         // Here we need to route to all active consumers for this endpoint
         const auto& consumers = m_endpoint_consumers[endpoint_id];
-        
+            
         // For each active consumer, we need to send to their input adapter
         PushBatch batch( m_engine -> rootEngine() );  // TODO is this right?
         for (size_t consumer_id = 0; consumer_id < consumers.size(); ++consumer_id) {
@@ -295,7 +319,7 @@ void WebsocketEndpointManager::handleEndpointFailure(const std::string& endpoint
     }
     
     std::stringstream ss;
-    ss << "Connection Failure for " << endpoint_id << ": " << reason;
+    ss << "Connection Failure for endpoint={" << endpoint_id << "} Due to: " << reason;
     if ( status_type == ClientStatusType::CLOSED || status_type == ClientStatusType::ACTIVE )
         m_mgr -> pushStatus(StatusLevel::INFO, status_type, ss.str());
     else{
@@ -316,18 +340,15 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
     // This should only get called from the thread running
     // m_ioc. This allows us to avoid locks on internal data
     // structures
+    // std::cout << " HEY YA\n";
     auto endpoint_id = properties.get<std::string>("uri");
+    // std::cout << endpoint_id;
     autogen::ActionType action = autogen::ActionType::create( properties.get<std::string>("action") );
-    // Change headers if needed here!
+    // std::cout << action.asString() << "\n";
+    // // Change headers if needed here!
     switch(action.enum_value()) {
         case autogen::ActionType::enum_::CONNECT: {
             auto persistent = properties.get<bool>("persistent");
-            // if (!persistent){
-            //     WebsocketEndpointManager::setupOneOffConnection(endpoint_id, properties);
-            // }
-            // else {
-            bool is_new_endpoint = !m_endpoints.contains(endpoint_id);
-
             auto reconnect_interval = properties.get<TimeDelta>("reconnect_interval");
             // Update endpoint config
             auto& config = m_endpoint_configs.try_emplace(endpoint_id, m_ioc).first->second;
@@ -335,7 +356,7 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
             config.reconnect_interval = std::chrono::milliseconds(
                 reconnect_interval.asMilliseconds()
             );
-            std::string payload;
+            std::string payload = "";
             bool has_payload = properties.tryGet<std::string>("on_connect_payload", payload);
 
             if (has_payload && !payload.empty() && persistent) {
@@ -354,8 +375,9 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
                 }
             }
 
+            bool is_new_endpoint = !m_endpoints.contains(endpoint_id);
             if (is_new_endpoint) {
-                auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
+                [[maybe_unused]] auto endpoint = std::make_unique<WebsocketEndpoint>(m_ioc, properties);
                 // We can safely move payload regardless - if it was never written to, it's just an empty string
                 WebsocketEndpointManager::setupEndpoint(endpoint_id, std::move(endpoint), 
                                                     (has_payload && !payload.empty() && persistent) ? "" : std::move(payload),
@@ -393,6 +415,14 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
         }
     }
 };
+
+WebsocketEndpoint * WebsocketEndpointManager::getNonDynamicEndpoint(){
+    // Should only be called if dynamic = False
+    if (!m_endpoints.empty()) {
+        return m_endpoints.begin()->second.get();
+    }
+    return nullptr;
+}
 
 void WebsocketEndpointManager::addConsumer(const std::string& endpoint_id, size_t caller_id) {
     ensureVectorSize(m_endpoint_consumers[endpoint_id], caller_id);
@@ -443,26 +473,26 @@ void WebsocketEndpointManager::removeProducer(const std::string& endpoint_id, si
 
 void WebsocketEndpointManager::stop() {
     m_shouldRun=false;
-    if( m_dynamic ){
-        // Stop all endpoints
-        // Endpoints running on m_ioc thread,
-        // So we call stop there
-        boost::asio::post(m_ioc, [this]() {
-            for (auto& [endpoint_id, _] : m_endpoints) {
-                // TODO ponder
-                // Since this is called from the main thread,
-                // We post to the m_ioc thread
-                shutdownEndpoint(endpoint_id);
-                // endpoint->stop();
-            }
-        });
-        // Stop the work guard to allow the io_context to complete
-        if (m_work_guard )
-            m_work_guard.reset();
-    }
-    else{
-        if( m_active ) m_endpoint->stop( false );
-    }
+    // if( m_dynamic ){
+    // Stop all endpoints
+    // Endpoints running on m_ioc thread,
+    // So we call stop there
+    boost::asio::post(m_ioc, [this]() {
+        for (auto& [endpoint_id, _] : m_endpoints) {
+            // TODO ponder
+            // Since this is called from the main thread,
+            // We post to the m_ioc thread
+            shutdownEndpoint(endpoint_id);
+            // endpoint->stop();
+        }
+    });
+    // Stop the work guard to allow the io_context to complete
+    if (m_work_guard )
+        m_work_guard.reset();
+    // }
+    // else{
+    //     if( m_active ) m_endpoint->stop( false );
+    // }
     m_ioc.stop();
     m_cv.notify_one();
     if( m_thread ) m_thread->join();
@@ -470,50 +500,34 @@ void WebsocketEndpointManager::stop() {
 
 PushInputAdapter* WebsocketEndpointManager::getInputAdapter(CspTypePtr & type, PushMode pushMode, const Dictionary & properties)
 {   
-    if ( m_dynamic ){
-        auto caller_id = properties.get<int64_t>("caller_id");
-        size_t validated_id = validateCallerId(caller_id);
-        auto input_adapter = m_engine -> createOwnedObject<ClientInputAdapter>(
-            type,
-            pushMode,
-            properties,
-            m_dynamic   
-        );
-        m_inputAdapters[validated_id] = input_adapter;
-        return m_inputAdapters[validated_id];
-    }
-    if (m_inputAdapter == nullptr)
-    {
-        m_inputAdapter = m_engine -> createOwnedObject<ClientInputAdapter>(
-            type,
-            pushMode,
-            properties,
-            m_dynamic    
-        );
-    }
-    return m_inputAdapter;
+    auto caller_id = properties.get<int64_t>("caller_id");
+    size_t validated_id = validateCallerId(caller_id);
+    auto input_adapter = m_engine -> createOwnedObject<ClientInputAdapter>(
+        type,
+        pushMode,
+        properties,
+        m_dynamic
+    );
+    m_inputAdapters[validated_id] = input_adapter;
+    return m_inputAdapters[validated_id];
 };
 
 OutputAdapter* WebsocketEndpointManager::getOutputAdapter( const Dictionary & properties )
 {
-    if ( m_dynamic ){
-        auto caller_id = properties.get<int64_t>("caller_id");
-        size_t validated_id = validateCallerId(caller_id);
-        assert(!properties.get<bool>("is_subscribe"));
-        assert(m_outputAdapters.size() == validated_id);
+    auto caller_id = properties.get<int64_t>("caller_id");
+    size_t validated_id = validateCallerId(caller_id);
+    assert(!properties.get<bool>("is_subscribe"));
+    assert(m_outputAdapters.size() == validated_id);
 
-        auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>( *m_endpoint, this, validated_id, m_ioc, m_dynamic );
-        m_outputAdapters[validated_id] = output_adapter;
-        return m_outputAdapters[validated_id];
-    }
-    // validated_id does not matter here
-    if (m_outputAdapter == nullptr) m_outputAdapter = m_engine -> createOwnedObject<ClientOutputAdapter>( *m_endpoint, this, 0, m_ioc, m_dynamic );
-    return m_outputAdapter;
+    auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>( this, validated_id, m_ioc );
+    m_outputAdapters[validated_id] = output_adapter;
+    return m_outputAdapters[validated_id];
 };
 
 OutputAdapter * WebsocketEndpointManager::getHeaderUpdateAdapter()
 {
-    if (m_updateAdapter == nullptr) m_updateAdapter = m_engine -> createOwnedObject<ClientHeaderUpdateOutputAdapter>( m_endpoint -> getProperties() );
+    if (m_updateAdapter == nullptr)
+        m_updateAdapter = m_engine -> createOwnedObject<ClientHeaderUpdateOutputAdapter>( m_endpoint -> getProperties(), this );
 
     return m_updateAdapter;
 };

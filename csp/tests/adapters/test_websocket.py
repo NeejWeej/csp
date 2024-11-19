@@ -250,7 +250,13 @@ class TestWebsocket:
                         timedelta(milliseconds=100),
                         ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT),
                     ),
-                    (timedelta(milliseconds=350), ConnectionRequest(uri="ws://localhost:8000/")),
+                    (
+                        timedelta(milliseconds=350),
+                        ConnectionRequest(
+                            uri="ws://localhost:8000/",
+                            headers={"dummy_key": "dummy_value"},
+                        ),
+                    ),
                 ],
             )
             const_conn_request = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))

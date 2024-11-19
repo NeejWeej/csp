@@ -501,7 +501,7 @@ class WebsocketAdapterManager:
             headers=conn_request.headers,
             persistent=conn_request.persistent,
             action=conn_request.action.name,
-            on_connect_payload=getattr(conn_request, "on_connect_payload", ""),
+            on_connect_payload=conn_request.on_connect_payload,
             uri=uri,
             dynamic=self._dynamic,
         )
@@ -553,20 +553,20 @@ class WebsocketAdapterManager:
         caller_id = self._get_caller_id(is_subscribe=True)
         # Gives validation, more to start defining a common interface
         adapter_props = AdapterInfo(caller_id=caller_id, is_subscribe=True).model_dump()
-        if connection_request is None and self._dynamic:
-            raise ValueError(
-                "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
-            )
-
-        if connection_request is not None:
-            # request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
-            request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
-            # We just declare it here, so it gets included in the graph
-            # since nothing is returned.
-            # csp.print("req dict", request_dict)
-            _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
-            # If in dynamic mode, we wrap the message in a struct to include the url the data
-            # is coming from
+        # if connection_request is None and self._dynamic:
+        #     raise ValueError(
+        #         "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
+        #     )
+        connection_request = csp.null_ts(ConnectionRequest) if connection_request is None else connection_request
+        # if connection_request is not None:
+        # request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
+        request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
+        # We just declare it here, so it gets included in the graph
+        # since nothing is returned.
+        # csp.print("req dict", request_dict)
+        _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
+        # If in dynamic mode, we wrap the message in a struct to include the url the data
+        # is coming from
 
         field_map = field_map or {}
         meta_field_map = meta_field_map or {}
@@ -589,19 +589,20 @@ class WebsocketAdapterManager:
         caller_id = self._get_caller_id(is_subscribe=False)
         # Gives validation, more to start defining a common interface
         adapter_props = AdapterInfo(caller_id=caller_id, is_subscribe=False).model_dump()
-        if connection_request is None and self._dynamic:
-            raise ValueError(
-                "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
-            )
+        connection_request = csp.null_ts(ConnectionRequest) if connection_request is None else connection_request
+        # if connection_request is None and self._dynamic:
+        #     raise ValueError(
+        #         "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
+        #     )
 
         # TODO:
         # Consider allowing header updates go through here
         # In non-dynamic mode
-        if connection_request is not None:
-            request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
-            # We just declare it here, so it gets included in the graph
-            # since nothing is returned.
-            _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
+        # if connection_request is not None:
+        request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
+        # We just declare it here, so it gets included in the graph
+        # since nothing is returned.
+        _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
         return _websocket_output_adapter_def(self, x, adapter_props)
 
     def update_headers(self, x: ts[List[WebsocketHeaderUpdate]]):

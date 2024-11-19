@@ -40,6 +40,7 @@ class WebsocketEndpoint; // Forward declaration
 class ClientAdapterManager; //Forward declare
 class ClientOutputAdapter;
 class ClientConnectionRequestAdapter;
+class ClientHeaderUpdateOutputAdapter;
 
 
 // struct WebsocketClientStatusTypeTraits
@@ -112,7 +113,7 @@ public:
 
     void removeProducer(const std::string& endpoint_id, size_t caller_id);
 
-
+    WebsocketEndpoint * getNonDynamicEndpoint();
     PushInputAdapter * getInputAdapter( CspTypePtr & type, PushMode pushMode, const Dictionary & properties );
     OutputAdapter * getOutputAdapter( const Dictionary & properties );
     OutputAdapter * getHeaderUpdateAdapter();

@@ -19,11 +19,10 @@ class ClientOutputAdapter final: public OutputAdapter
 public:
     ClientOutputAdapter(
         Engine * engine,
-        WebsocketEndpoint& endpoint,
         WebsocketEndpointManager * websocketManager,
         size_t caller_id,
-        net::io_context& ioc,
-        bool dynamic
+        net::io_context& ioc
+        // bool dynamic
     );
 
     void executeImpl() override;
@@ -31,11 +30,10 @@ public:
     const char * name() const override { return "WebsocketClientOutputAdapter"; }
 
 private:
-    [[maybe_unused]] WebsocketEndpoint& m_endpoint;
     WebsocketEndpointManager* m_websocketManager;
     size_t m_callerId;
     net::io_context& m_ioc;
-    bool m_dynamic;
+    // bool m_dynamic;
     // std::unordered_map<std::string, std::vector<bool>>& m_endpoint_consumers;
 };
 
