@@ -649,7 +649,6 @@ _websocket_header_update_adapter_def = output_adapter_def(
     _websocketadapterimpl._websocket_header_update_adapter,
     WebsocketAdapterManager,
     input=ts[List[WebsocketHeaderUpdate]],
-    properties=dict,
 )
 
 _websocket_connection_request_adapter_def = output_adapter_def(

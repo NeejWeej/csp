@@ -60,8 +60,13 @@ void WebsocketEndpoint::stop( bool stop_ioc )
 }
 
 void WebsocketEndpoint::updateHeaders(csp::Dictionary properties){
-    auto headers = properties.get<DictionaryPtr>("headers");
-    m_properties.update("headers", headers);
+    DictionaryPtr headers = m_properties.get<DictionaryPtr>("headers");
+    for (auto it = properties.begin(); it != properties.end(); ++it) {
+        std::string key = it.key();
+        // std::cout<< "Key: " << key << "\n";
+        auto value = it.value<std::string>();
+        headers->update(key, std::move(value));
+    }
 }
 
 csp::Dictionary& WebsocketEndpoint::getProperties() {

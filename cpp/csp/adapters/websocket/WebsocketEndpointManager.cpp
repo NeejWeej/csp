@@ -384,7 +384,8 @@ void WebsocketEndpointManager::handleConnectionRequest(const Dictionary & proper
                     m_endpoints[endpoint_id]->send(payload);
                 // Conscious decision to let non-persisten connection
                 // results to update the header
-                m_endpoints[endpoint_id]->updateHeaders(properties);
+                auto headers = properties.get<DictionaryPtr>("headers");
+                m_endpoints[endpoint_id]->updateHeaders(*headers);
             }
             // }
             break;

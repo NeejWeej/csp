@@ -4,7 +4,7 @@ import pytz
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional, Type
 
 import csp
 from csp import ts
@@ -21,11 +21,15 @@ if os.environ.get("CSP_TEST_WEBSOCKET"):
         RawTextMessageMapper,
         Status,
         WebsocketAdapterManager,
+        WebsocketHeaderUpdate,
         WebsocketStatus,
     )
 
     class EchoWebsocketHandler(tornado.websocket.WebSocketHandler):
         def on_message(self, msg):
+            # Carve-out to allow inspecting the headers
+            if msg == "header1":
+                msg = self.request.headers.get(msg, "")
             return self.write_message(msg)
 
     @contextmanager
@@ -93,6 +97,65 @@ class TestWebsocket:
 
         msgs = csp.run(g, starttime=datetime.now(pytz.UTC), realtime=True)
         assert msgs["recv"][0][1] == "Hello, World!"
+
+    def test_headers(self):
+        @csp.graph
+        def g(dynamic: bool):
+            if dynamic:
+                ws = WebsocketAdapterManager(dynamic=True)
+                # Connect with header
+                conn_request1 = csp.const(
+                    [
+                        ConnectionRequest(
+                            uri="ws://localhost:8000/", on_connect_payload="header1", headers={"header1": "value1"}
+                        )
+                    ]
+                )
+                # Disconnect to shutdown endpoint
+                conn_request2 = csp.const(
+                    [ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT)],
+                    delay=timedelta(milliseconds=100),
+                )
+                # Reconnect to open endpoint with new headers
+                conn_request3 = csp.const(
+                    [
+                        ConnectionRequest(
+                            uri="ws://localhost:8000/", on_connect_payload="header1", headers={"header1": "value2"}
+                        )
+                    ],
+                    delay=timedelta(milliseconds=150),
+                )
+                conn_req = csp.flatten([conn_request1, conn_request2, conn_request3])
+                recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_req)
+                csp.add_graph_output("recv", recv)
+                stop = csp.filter(csp.count(recv) == 2, recv)
+                csp.stop_engine(stop)
+
+            if not dynamic:
+                ws = WebsocketAdapterManager("ws://localhost:8000/", headers={"header1": "value1"})
+                status = ws.status()
+                send_msg = csp.sample(status, csp.const("header1"))
+                to_send = csp.merge(send_msg, csp.const("header1", delay=timedelta(milliseconds=100)))
+                ws.send(to_send)
+                recv = ws.subscribe(str, RawTextMessageMapper())
+
+                header_update = csp.const(
+                    [WebsocketHeaderUpdate(key="header1", value="value2")], delay=timedelta(milliseconds=50)
+                )
+                # Doesn' tick out since we don't disconnect
+                ws.update_headers(header_update)
+
+                csp.add_graph_output("recv", recv)
+                csp.stop_engine(recv)
+
+        msgs = csp.run(g, dynamic=False, starttime=datetime.now(pytz.UTC), realtime=True)
+        assert msgs["recv"][0][1] == "value1"
+
+        msgs = csp.run(g, dynamic=True, starttime=datetime.now(pytz.UTC), realtime=True)
+        assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
+        assert msgs["recv"][1][1].uri == "ws://localhost:8000/"
+        assert msgs["recv"][0][1].msg == "value1"
+        assert msgs["recv"][1][1].msg == "value2"
 
     @pytest.mark.parametrize("send_payload_subscribe", [True, False])
     def test_send_recv_json_dynamic_on_connect_payload(self, send_payload_subscribe):
