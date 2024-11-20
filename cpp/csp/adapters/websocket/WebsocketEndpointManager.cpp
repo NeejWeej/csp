@@ -146,10 +146,6 @@ bool WebsocketEndpointManager::adapterPruned( size_t caller_id ){
 
 void WebsocketEndpointManager::send(const std::string& value, const size_t& caller_id) {
     // Safety check for caller_id
-    if (caller_id >= m_producer_endpoints.size()) {
-        return;
-    }
-
     // Get all endpoints this producer is connected to
     const auto& endpoints = m_producer_endpoints[caller_id];
     
@@ -261,11 +257,11 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
     stored_endpoint->setOnMessage([this, endpoint_id](void* data, size_t len) {
         // Here we need to route to all active consumers for this endpoint
         const auto& consumers = m_endpoint_consumers[endpoint_id];
-            
+        
         // For each active consumer, we need to send to their input adapter
         PushBatch batch( m_engine -> rootEngine() );  // TODO is this right?
         for (size_t consumer_id = 0; consumer_id < consumers.size(); ++consumer_id) {
-            if (consumers[consumer_id]) {
+                        if (consumers[consumer_id]) {
                 std::vector<uint8_t> data_copy(static_cast<uint8_t*>(data), 
                                     static_cast<uint8_t*>(data) + len);
                 // auto tup = std::tuple<std::string, void*> {endpoint_id, data};

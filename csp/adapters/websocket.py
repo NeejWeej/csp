@@ -557,10 +557,12 @@ class WebsocketAdapterManager:
         #     raise ValueError(
         #         "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
         #     )
-        connection_request = csp.null_ts(ConnectionRequest) if connection_request is None else connection_request
+        connection_request = csp.null_ts(List[ConnectionRequest]) if connection_request is None else connection_request
         # if connection_request is not None:
         # request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
-        request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
+        request_dict = csp.apply(
+            connection_request, lambda conn_reqs: [self._get_properties(conn_req) for conn_req in conn_reqs], list
+        )
         # We just declare it here, so it gets included in the graph
         # since nothing is returned.
         # csp.print("req dict", request_dict)
@@ -585,11 +587,11 @@ class WebsocketAdapterManager:
             ts_type = self.get_wrapper_struct(ts_type=ts_type)
         return _websocket_input_adapter_def(self, ts_type, properties, push_mode=push_mode)
 
-    def send(self, x: ts["T"], connection_request: Optional[ts[ConnectionRequest]] = None):
+    def send(self, x: ts["T"], connection_request: Optional[ts[List[ConnectionRequest]]] = None):
         caller_id = self._get_caller_id(is_subscribe=False)
         # Gives validation, more to start defining a common interface
         adapter_props = AdapterInfo(caller_id=caller_id, is_subscribe=False).model_dump()
-        connection_request = csp.null_ts(ConnectionRequest) if connection_request is None else connection_request
+        connection_request = csp.null_ts(List[ConnectionRequest]) if connection_request is None else connection_request
         # if connection_request is None and self._dynamic:
         #     raise ValueError(
         #         "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
@@ -599,7 +601,9 @@ class WebsocketAdapterManager:
         # Consider allowing header updates go through here
         # In non-dynamic mode
         # if connection_request is not None:
-        request_dict = csp.apply(connection_request, lambda conn_req: self._get_properties(conn_req), dict)
+        request_dict = csp.apply(
+            connection_request, lambda conn_reqs: [self._get_properties(conn_req) for conn_req in conn_reqs], list
+        )
         # We just declare it here, so it gets included in the graph
         # since nothing is returned.
         _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
@@ -652,7 +656,7 @@ _websocket_connection_request_adapter_def = output_adapter_def(
     "websocket_connection_request_adapter",
     _websocketadapterimpl._websocket_connection_request_adapter,
     WebsocketAdapterManager,
-    input=ts[dict],
+    input=ts[list],  # needed, List[dict] didn't work
     properties=dict,
 )
 

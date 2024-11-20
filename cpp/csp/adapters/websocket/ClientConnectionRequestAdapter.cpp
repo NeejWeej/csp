@@ -30,14 +30,17 @@ void ClientConnectionRequestAdapter::executeImpl()
     if (unlikely(m_isPruned))
         return;
 
-    auto raw_val = input() -> lastValueTyped<PyObject*>();
-    Dictionary val = python::fromPython<Dictionary>( raw_val );
+    auto raw_val = input()->lastValueTyped<PyObject*>();
+    auto val = python::fromPython<std::vector<Dictionary>>(raw_val); // Pass empty CspType
+
     // We intentionally post here, we want the thread running
     // m_ioc to handle the connection request. We want to keep
     // all updates to internal data structures at graph run-time
     // to that thread.
     boost::asio::post(m_ioc, [this, val=std::move(val)]() {
-        m_websocketManager -> handleConnectionRequest(val, m_callerId, m_isSubscribe);
+        for(const auto& conn_req: val) {
+            m_websocketManager->handleConnectionRequest(conn_req, m_callerId, m_isSubscribe);
+        }
     });
 };
 

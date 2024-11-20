@@ -111,11 +111,11 @@ class TestWebsocket:
             if not send_payload_subscribe:
                 # We send payload via the dummy send function
                 # The 'on_connect_payload sends the result
-                ws.send(csp.null_ts(object), connection_request=csp.const(conn_request))
+                ws.send(csp.null_ts(object), connection_request=csp.const([conn_request]))
             subscribe_connection_request = (
-                ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.CONNECT)
+                [ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.CONNECT)]
                 if not send_payload_subscribe
-                else conn_request
+                else [conn_request]
             )
             recv = ws.subscribe(
                 MsgStruct, JSONTextMessageMapper(), connection_request=csp.const(subscribe_connection_request)
@@ -201,10 +201,12 @@ class TestWebsocket:
         def g():
             ws = WebsocketAdapterManager(dynamic=True)
             conn_request = csp.const(
-                ConnectionRequest(
-                    uri="ws://localhost:8000/",
-                    action=ActionType.CONNECT,
-                )
+                [
+                    ConnectionRequest(
+                        uri="ws://localhost:8000/",
+                        action=ActionType.CONNECT,
+                    )
+                ]
             )
             val = csp.curve(int, [(timedelta(milliseconds=50), 0), (timedelta(milliseconds=500), 1)])
             hello = csp.apply(val, lambda x: f"hi world{x}", str)
@@ -231,7 +233,8 @@ class TestWebsocket:
         assert msgs["recv"][1][1] == "hi world1"
         assert msgs["recv"][2][1] == "hi world1"
 
-    def test_dynamic_disconnect_connect_pruned_subscribe(self):
+    @pytest.mark.parametrize("reconnect_immeditately", [False, True])
+    def test_dynamic_disconnect_connect_pruned_subscribe(self, reconnect_immeditately):
         @csp.node
         def prevent_prune(objs: ts[str]):
             if csp.ticked(objs):
@@ -242,24 +245,33 @@ class TestWebsocket:
         def g():
             ws = WebsocketAdapterManager(dynamic=True)
 
+            if reconnect_immeditately:
+                disconnect_reqs = [
+                    ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT),
+                    ConnectionRequest(uri="ws://localhost:8000/"),
+                ]
+            else:
+                disconnect_reqs = [ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT)]
             conn_request = csp.curve(
-                ConnectionRequest,
+                List[ConnectionRequest],
                 [
-                    (timedelta(), ConnectionRequest(uri="ws://localhost:8000/")),
+                    (timedelta(), [ConnectionRequest(uri="ws://localhost:8000/")]),
                     (
                         timedelta(milliseconds=100),
-                        ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.DISCONNECT),
+                        disconnect_reqs,
                     ),
                     (
                         timedelta(milliseconds=350),
-                        ConnectionRequest(
-                            uri="ws://localhost:8000/",
-                            headers={"dummy_key": "dummy_value"},
-                        ),
+                        [
+                            ConnectionRequest(
+                                uri="ws://localhost:8000/",
+                                headers={"dummy_key": "dummy_value"},
+                            ),
+                        ],
                     ),
                 ],
             )
-            const_conn_request = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
+            const_conn_request = csp.const([ConnectionRequest(uri="ws://localhost:8000/")])
             val = csp.curve(int, [(timedelta(milliseconds=100, microseconds=1), 0), (timedelta(milliseconds=500), 1)])
             hello = csp.apply(val, lambda x: f"hi world{x}", str)
 
@@ -277,24 +289,34 @@ class TestWebsocket:
             recv4 = ws.subscribe(
                 str,
                 RawTextMessageMapper(),
-                connection_request=csp.const(no_persist_conn, delay=timedelta(milliseconds=250)),
+                connection_request=csp.const([no_persist_conn], delay=timedelta(milliseconds=250)),
             )
 
             csp.add_graph_output("recv", recv)
             csp.add_graph_output("recv3", recv3)
             csp.add_graph_output("recv4", recv4)
-            csp.stop_engine(recv)
+            end = csp.filter(csp.count(recv3) == 3, recv3)
+            csp.stop_engine(end)
 
         msgs = csp.run(g, starttime=datetime.now(pytz.UTC), endtime=timedelta(seconds=1), realtime=True)
-        assert len(msgs["recv"]) == 1
-        assert len(msgs["recv3"]) == 3
         # Did not persist, so did not receive any messages
         assert len(msgs["recv4"]) == 0
         # Only the second message is received, since we disonnect before the first one is sent
-        assert msgs["recv"][0][1].msg == "hi world1"
-        assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
+        if not reconnect_immeditately:
+            assert len(msgs["recv"]) == 1
+            assert msgs["recv"][0][1].msg == "hi world1"
+            assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
+        else:
+            assert len(msgs["recv"]) == 3
+            assert msgs["recv"][0][1].msg == "hi world0"
+            assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
+            assert msgs["recv"][1][1].msg == "hi non-persistent world!"
+            assert msgs["recv"][1][1].uri == "ws://localhost:8000/"
+            assert msgs["recv"][2][1].msg == "hi world1"
+            assert msgs["recv"][2][1].uri == "ws://localhost:8000/"
 
         # This subscribe call received all the messages
+        assert len(msgs["recv3"]) == 3
         assert msgs["recv3"][0][1].msg == "hi world0"
         assert msgs["recv3"][0][1].uri == "ws://localhost:8000/"
         assert msgs["recv3"][1][1].msg == "hi non-persistent world!"
@@ -307,10 +329,12 @@ class TestWebsocket:
         def g():
             ws = WebsocketAdapterManager(dynamic=True)
             conn_request = csp.const(
-                ConnectionRequest(
-                    uri="ws://localhost:8000/",
-                    action=ActionType.CONNECT,
-                )
+                [
+                    ConnectionRequest(
+                        uri="ws://localhost:8000/",
+                        action=ActionType.CONNECT,
+                    )
+                ]
             )
             val = csp.curve(int, [(timedelta(milliseconds=50), 0), (timedelta(milliseconds=500), 1)])
             hello = csp.apply(val, lambda x: f"hi world{x}", str)
@@ -346,14 +370,14 @@ class TestWebsocket:
                 ws = WebsocketAdapterManager(dynamic=True)
                 if use_on_connect_payload:
                     conn_request1 = csp.const(
-                        ConnectionRequest(uri="ws://localhost:8000/", on_connect_payload="hey world from 8000")
+                        [ConnectionRequest(uri="ws://localhost:8000/", on_connect_payload="hey world from 8000")]
                     )
                     conn_request2 = csp.const(
-                        ConnectionRequest(uri="ws://localhost:8001/", on_connect_payload="hey world from 8001")
+                        [ConnectionRequest(uri="ws://localhost:8001/", on_connect_payload="hey world from 8001")]
                     )
                 else:
-                    conn_request1 = csp.const(ConnectionRequest(uri="ws://localhost:8000/"))
-                    conn_request2 = csp.const(ConnectionRequest(uri="ws://localhost:8001/"))
+                    conn_request1 = csp.const([ConnectionRequest(uri="ws://localhost:8000/")])
+                    conn_request2 = csp.const([ConnectionRequest(uri="ws://localhost:8001/")])
                     status = ws.status()
                     to_send = send_on_status(status, "ws://localhost:8000/", "hey world from 8000")
                     to_send2 = send_on_status(status, "ws://localhost:8001/", "hey world from 8001")
@@ -406,9 +430,12 @@ class TestWebsocket:
                     JSONTextMessageMapper(),
                     push_mode=csp.PushMode.BURST,
                     connection_request=csp.const(
-                        ConnectionRequest(
-                            uri="ws://localhost:8000/", on_connect_payload=MsgStruct(a=1234, b="im a string").to_json()
-                        )
+                        [
+                            ConnectionRequest(
+                                uri="ws://localhost:8000/",
+                                on_connect_payload=MsgStruct(a=1234, b="im a string").to_json(),
+                            )
+                        ]
                     ),
                 )
                 recv = csp.apply(wrapped_recv, lambda vals: [v.msg for v in vals], List[MsgStruct])
