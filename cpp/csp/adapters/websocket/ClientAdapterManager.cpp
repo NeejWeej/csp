@@ -18,22 +18,7 @@ namespace csp::adapters::websocket {
 
 ClientAdapterManager::ClientAdapterManager( Engine* engine, const Dictionary & properties ) 
 : AdapterManager( engine ), 
-    // m_ioc(),
-    // m_active( false ), 
-    // m_shouldRun( false ), 
-    // m_endpoint(!properties.get<bool>("dynamic") ? 
-    //     std::make_unique<WebsocketEndpoint>( m_ioc, properties ) : 
-    //     nullptr),
-    // // m_endpoint( std::make_unique<WebsocketEndpoint>( m_ioc, properties ) ),
-    // m_inputAdapter( nullptr ), 
-    // m_outputAdapter( nullptr ),
-    // m_updateAdapter( nullptr ),
-    // m_thread( nullptr ), 
-    m_properties( properties )
-    // m_work_guard(properties.get<bool>("dynamic") ? 
-    //     std::make_optional(boost::asio::make_work_guard(m_ioc)) : 
-    //     std::nullopt),
-    // m_dynamic( properties.get<bool>("dynamic") )
+  m_properties( properties )
 { }
 
 ClientAdapterManager::~ClientAdapterManager()

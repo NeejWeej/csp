@@ -24,14 +24,6 @@ void ClientHeaderUpdateOutputAdapter::executeImpl()
         auto endpoint = m_mgr -> getNonDynamicEndpoint();
         endpoint -> updateHeaders(std::move(headers));
     });
-
-    // Get the first e
-    // ndpoint from the map and call updateHeaders
-    // DictionaryPtr headers = m_properties.get<DictionaryPtr>("headers");
-    // for( auto& update : input() -> lastValueTyped<std::vector<WebsocketHeaderUpdate::Ptr>>() )
-    // { 
-    //     if( update -> key_isSet() && update -> value_isSet() ) headers->update( update->key(), update->value() ); 
-    // }
 };
 
 }

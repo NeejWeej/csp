@@ -463,26 +463,6 @@ class WebsocketAdapterManager:
     def _dynamic(self):
         return self._properties.get("dynamic", False)
 
-    # @staticmethod
-    # def to_internal_connection_request(conn_req: ConnectionRequest) -> InternalConnectionRequest:
-    #     # TODO Use?
-    #     uri = conn_req.uri
-    #     reconnect_interval = conn_req.reconnect_interval
-    #     resp = urllib.parse.urlparse(uri)
-    #     if resp.hostname is None:
-    #         raise ValueError(f"Failed to parse host from URI: {uri}")
-
-    #     assert reconnect_interval >= timedelta(seconds=1)
-    #     conn_req_dict = ConnectionRequest.to_dict()
-    #     update_dict = dict(
-    #         use_ssl=uri.startswith("wss"),
-    #         route=resp.path or "/",  # resource shouldn't be empty string
-    #         host=resp.hostname,
-    #         port=_sanitize_port(uri, resp.port),
-    #     )
-    #     conn_req_dict.update(update_dict)
-    #     return InternalConnectionRequest(**conn_req_dict)
-
     def _get_properties(self, conn_request: ConnectionRequest) -> dict:
         uri = conn_request.uri
         reconnect_interval = conn_request.reconnect_interval
@@ -554,22 +534,12 @@ class WebsocketAdapterManager:
         caller_id = self._get_caller_id(is_subscribe=True)
         # Gives validation, more to start defining a common interface
         adapter_props = AdapterInfo(caller_id=caller_id, is_subscribe=True).model_dump()
-        # if connection_request is None and self._dynamic:
-        #     raise ValueError(
-        #         "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
-        #     )
         connection_request = csp.null_ts(List[ConnectionRequest]) if connection_request is None else connection_request
-        # if connection_request is not None:
-        # request_dict = self._enrich_with_caller_id(connection_request, caller_id, is_subscribe=True)
         request_dict = csp.apply(
             connection_request, lambda conn_reqs: [self._get_properties(conn_req) for conn_req in conn_reqs], list
         )
-        # We just declare it here, so it gets included in the graph
-        # since nothing is returned.
-        # csp.print("req dict", request_dict)
+        # Output adapter to handle connection requests
         _websocket_connection_request_adapter_def(self, request_dict, adapter_props)
-        # If in dynamic mode, we wrap the message in a struct to include the url the data
-        # is coming from
 
         field_map = field_map or {}
         meta_field_map = meta_field_map or {}
@@ -584,6 +554,7 @@ class WebsocketAdapterManager:
         properties["meta_field_map"] = meta_field_map
 
         properties.update(adapter_props)
+        # We wrap the message in a struct to note the url it comes from
         if self._dynamic:
             ts_type = self.get_wrapper_struct(ts_type=ts_type)
         return _websocket_input_adapter_def(self, ts_type, properties, push_mode=push_mode)
@@ -593,15 +564,6 @@ class WebsocketAdapterManager:
         # Gives validation, more to start defining a common interface
         adapter_props = AdapterInfo(caller_id=caller_id, is_subscribe=False).model_dump()
         connection_request = csp.null_ts(List[ConnectionRequest]) if connection_request is None else connection_request
-        # if connection_request is None and self._dynamic:
-        #     raise ValueError(
-        #         "'connection_request' must not be None if this adapter is dynamic. Use 'csp.null_ts(ConnectionRequest)' if this was intentional"
-        #     )
-
-        # TODO:
-        # Consider allowing header updates go through here
-        # In non-dynamic mode
-        # if connection_request is not None:
         request_dict = csp.apply(
             connection_request, lambda conn_reqs: [self._get_properties(conn_req) for conn_req in conn_reqs], list
         )

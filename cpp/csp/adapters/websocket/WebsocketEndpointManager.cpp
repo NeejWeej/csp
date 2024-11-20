@@ -20,10 +20,7 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
     m_updateAdapter( nullptr ),
     m_thread( nullptr ), 
     m_properties( properties ),
-    m_work_guard(std::make_optional(boost::asio::make_work_guard(m_ioc))),
-    // m_work_guard(properties.get<bool>("dynamic") ? 
-    //     std::make_optional(boost::asio::make_work_guard(m_ioc)) : 
-    //     std::nullopt),
+    m_work_guard(boost::asio::make_work_guard(m_ioc)),
     m_dynamic( properties.get<bool>("dynamic") ){
     // Total number of subscribe and send function calls, set on the adapter manager
     // when is it created. Note, that some of the input adapters might have been
@@ -50,8 +47,6 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
 void WebsocketEndpointManager::start(DateTime starttime, DateTime endtime) {
         // maybe restart here?
     m_shouldRun = true;
-    // std::vector<std::thread> threads;
-
     m_ioc.reset();
     if( !m_dynamic ){
         boost::asio::post(m_strand, [this]() {
@@ -59,20 +54,16 @@ void WebsocketEndpointManager::start(DateTime starttime, DateTime endtime) {
             // But we probably should check here.
             if( m_outputAdapters.size() == 1)
                 handleConnectionRequest(Dictionary(m_properties), 0, false);
-            // // If we have an input adapter call AND it's not pruned.
+            // If we have an input adapter call AND it's not pruned.
             if( m_inputAdapters.size() == 1 && !adapterPruned(0))
                 handleConnectionRequest(Dictionary(m_properties), 0, true);
         });
     }
-    for (auto i = 0; i < m_num_threads; ++i) {
+    for (size_t i = 0; i < m_num_threads; ++i) {
         m_threads.emplace_back(std::make_unique<std::thread>([this]() {
             m_ioc.run();
         }));
     }
-    // m_thread = std::make_unique<std::thread>([this]() {
-    //     // m_ioc.reset();
-    //     m_ioc.run();
-    // });
 };
 
 bool WebsocketEndpointManager::adapterPruned( size_t caller_id ){
@@ -145,12 +136,8 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
                                             size_t validated_id) 
 {
     // Store the endpoint first
-    // std::cout << "INSIDE SETUPENDPOINT \n";
-    // m_endpoints[endpoint_id] = std::move(endpoint);
-
     auto& stored_endpoint = m_endpoints[endpoint_id] = std::move(endpoint);
 
-    // Do this directly to not get any issues with race conditions or something. Make this atomic
     stored_endpoint->setOnOpen([this, endpoint_id, endpoint = stored_endpoint.get(), payload=std::move(payload), persist, is_consumer, validated_id]() {
         auto [iter, inserted] = m_endpoint_configs.try_emplace(endpoint_id, m_ioc);
         auto& config = iter->second;
@@ -422,8 +409,7 @@ void WebsocketEndpointManager::stop() {
         }
     });
     // Stop the work guard to allow the io_context to complete
-    if (m_work_guard )
-        m_work_guard.reset();
+    m_work_guard.reset();
     // }
     // else{
     //     if( m_active ) m_endpoint->stop( false );
