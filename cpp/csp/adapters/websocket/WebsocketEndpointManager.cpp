@@ -64,80 +64,6 @@ void WebsocketEndpointManager::start(DateTime starttime, DateTime endtime) {
         }
         m_ioc.run();
     });
-    // if( m_dynamic ){
-    //     // maybe restart here?
-    //     m_shouldRun = true;
-    //     m_thread = std::make_unique<std::thread>([this]() {
-    //         m_ioc.reset();
-    //         if( m_dynamic ){
-
-    //         }
-    //         m_ioc.run();
-    //     });
-    // }
-    // else {
-    //     // Don't use a work guard here
-    //     // TODO maybe use a work guard here
-    //     // m_work_guard.reset();
-    //     m_shouldRun = true;
-    //     m_endpoint -> setOnOpen(
-    //         [ this ]() {
-    //             m_active = true;
-    //             m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::ACTIVE, "Connected successfully" );
-    //         }
-    //     );
-    //     m_endpoint -> setOnFail(
-    //         [ this ]( const std::string& reason ) {
-    //             std::stringstream ss;
-    //             ss << "Connection Failure: " << reason;
-    //             m_active = false;
-    //             m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::CONNECTION_FAILED, ss.str() );
-    //         } 
-    //     );
-    //     if( m_inputAdapter ) {
-    //         m_endpoint -> setOnMessage(
-    //             [ this ]( void* c, size_t t ) {
-    //                 PushBatch batch( m_engine -> rootEngine() );
-    //                 m_inputAdapter -> processMessage( c, t, &batch );
-    //             }
-    //         );
-    //     } else {
-    //         // if a user doesn't call WebsocketAdapterManager.subscribe, no inputadapter will be created
-    //         // but we still need something to avoid on_message_cb not being set in the endpoint.
-    //         m_endpoint -> setOnMessage( []( void* c, size_t t ){} );
-    //     }
-    //     m_endpoint -> setOnClose(
-    //         [ this ]() {
-    //             m_active = false;
-    //             m_mgr -> pushStatus( StatusLevel::INFO, ClientStatusType::CLOSED, "Connection closed" );
-    //         }
-    //     );
-    //     m_endpoint -> setOnSendFail(
-    //         [ this ]( const std::string& s ) {
-    //             std::stringstream ss;
-    //             ss << "Failed to send: " << s;
-    //             m_mgr -> pushStatus( StatusLevel::ERROR, ClientStatusType::MESSAGE_SEND_FAIL, ss.str() );
-    //         }
-    //     );
-
-    //     m_thread = std::make_unique<std::thread>( [ this ]() { 
-    //         auto timeout = m_properties.get<TimeDelta>( "reconnect_interval" ).asSeconds();
-    //         while( m_shouldRun )
-    //         {
-    //             m_endpoint -> run();
-    //             m_ioc.run();
-    //             m_active = false;
-    //             m_ioc.reset();
-    //             std::unique_lock<std::mutex> lock(m_mutex);
-    //             if (m_cv.wait_for(lock, 
-    //                 std::chrono::seconds( timeout ), 
-    //                 [this] { return !m_shouldRun; })) {
-    //                 // If condition variable returns true, it means we were signaled to stop
-    //                 break;
-    //             }
-    //         }
-    //     });
-    // }
 };
 
 bool WebsocketEndpointManager::adapterPruned( size_t caller_id ){
@@ -197,6 +123,9 @@ void WebsocketEndpointManager::shutdownEndpoint(const std::string& endpoint_id) 
         endpoint_it->second->stop( false );
         m_endpoints.erase(endpoint_it);
     }
+    std::stringstream ss;
+    ss << "No more connections for endpoint={" << endpoint_id << "} Shuttind down...";
+    m_mgr -> pushStatus(StatusLevel::INFO,  ClientStatusType::CLOSED, ss.str());
 }
 
 void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id, 
@@ -241,7 +170,7 @@ void WebsocketEndpointManager::setupEndpoint(const std::string& endpoint_id,
             endpoint -> send(payload);
         
         m_mgr -> pushStatus(StatusLevel::INFO, ClientStatusType::ACTIVE, 
-                    "Connected successfully for endpoint " + endpoint_id);
+                    "Connected successfully for endpoint={" + endpoint_id +"}");
         // We remove the caller id, if it was the only one, then we shut down the endpoint
         if( !persist )
             removeEndpointForCallerId(endpoint_id, is_consumer, validated_id);

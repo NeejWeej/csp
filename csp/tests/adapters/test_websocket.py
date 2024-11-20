@@ -125,7 +125,21 @@ class TestWebsocket:
                     ],
                     delay=timedelta(milliseconds=150),
                 )
-                conn_req = csp.flatten([conn_request1, conn_request2, conn_request3])
+                conn_request3 = csp.const(
+                    [ConnectionRequest(uri="ws://localhost:8000/", action=ActionType.PING)],
+                    delay=timedelta(milliseconds=151),
+                )
+                conn_request4 = csp.const(
+                    [
+                        ConnectionRequest(
+                            uri="ws://localhost:8000/", on_connect_payload="header1", headers={"header1": "value2"}
+                        )
+                    ],
+                    delay=timedelta(milliseconds=200),
+                )
+                conn_req = csp.flatten([conn_request1, conn_request2, conn_request3, conn_request4])
+                status = ws.status()
+                csp.add_graph_output("status", status)
                 recv = ws.subscribe(str, RawTextMessageMapper(), connection_request=conn_req)
                 csp.add_graph_output("recv", recv)
                 stop = csp.filter(csp.count(recv) == 2, recv)
@@ -144,18 +158,27 @@ class TestWebsocket:
                 )
                 # Doesn' tick out since we don't disconnect
                 ws.update_headers(header_update)
+                status = ws.status()
+                csp.add_graph_output("status", status)
 
                 csp.add_graph_output("recv", recv)
                 csp.stop_engine(recv)
 
         msgs = csp.run(g, dynamic=False, starttime=datetime.now(pytz.UTC), realtime=True)
         assert msgs["recv"][0][1] == "value1"
+        assert len(msgs["status"]) == 1
+        assert msgs["status"][0][1].status_code == WebsocketStatus.ACTIVE.value
 
         msgs = csp.run(g, dynamic=True, starttime=datetime.now(pytz.UTC), realtime=True)
         assert msgs["recv"][0][1].uri == "ws://localhost:8000/"
         assert msgs["recv"][1][1].uri == "ws://localhost:8000/"
         assert msgs["recv"][0][1].msg == "value1"
         assert msgs["recv"][1][1].msg == "value2"
+
+        assert len(msgs["status"]) == 3
+        assert msgs["status"][0][1].status_code == WebsocketStatus.ACTIVE.value
+        assert msgs["status"][1][1].status_code == WebsocketStatus.CLOSED.value
+        assert msgs["status"][2][1].status_code == WebsocketStatus.ACTIVE.value
 
     @pytest.mark.parametrize("send_payload_subscribe", [True, False])
     def test_send_recv_json_dynamic_on_connect_payload(self, send_payload_subscribe):
