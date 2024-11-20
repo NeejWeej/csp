@@ -7,8 +7,9 @@ class WebsocketEndpointManager;
 ClientHeaderUpdateOutputAdapter::ClientHeaderUpdateOutputAdapter(
     Engine * engine,
     Dictionary& properties,
-    WebsocketEndpointManager * mgr
-) : OutputAdapter( engine ), m_properties( properties ), m_mgr( mgr )
+    WebsocketEndpointManager * mgr,
+    boost::asio::strand<boost::asio::io_context::executor_type>& strand
+) : OutputAdapter( engine ), m_properties( properties ), m_mgr( mgr ), m_strand( strand )
 { };
 
 void ClientHeaderUpdateOutputAdapter::executeImpl()
@@ -19,8 +20,10 @@ void ClientHeaderUpdateOutputAdapter::executeImpl()
             headers.update(update->key(), update->value());
         }
     }
-    auto endpoint = m_mgr -> getNonDynamicEndpoint();
-    endpoint -> updateHeaders(std::move(headers));
+    boost::asio::post(m_strand, [this, headers=std::move(headers)]() {
+        auto endpoint = m_mgr -> getNonDynamicEndpoint();
+        endpoint -> updateHeaders(std::move(headers));
+    });
 
     // Get the first e
     // ndpoint from the map and call updateHeaders

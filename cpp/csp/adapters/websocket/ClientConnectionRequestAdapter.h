@@ -22,7 +22,8 @@ public:
         WebsocketEndpointManager * websocketManager,
         net::io_context& ioc,
         bool isSubscribe,
-        size_t callerId
+        size_t callerId,
+        boost::asio::strand<boost::asio::io_context::executor_type>& strand
     );
 
     void executeImpl() override;
@@ -32,6 +33,7 @@ public:
 private:
     [[maybe_unused]] WebsocketEndpointManager* m_websocketManager;
     [[maybe_unused]] net::io_context& m_ioc;
+    boost::asio::strand<boost::asio::io_context::executor_type>& m_strand;
     bool m_isSubscribe;
     size_t m_callerId;
     bool m_checkPerformed;

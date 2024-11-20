@@ -422,7 +422,7 @@ class WebsocketAdapterManager:
         headers: Optional[Dict[str, str]] = None,
         dynamic: bool = False,
         connection_request: Optional[ConnectionRequest] = None,
-        num_threads: int = 1,
+        num_threads: int = 2,
     ):
         """
         uri: str
@@ -433,8 +433,9 @@ class WebsocketAdapterManager:
             headers to apply to the request during the handshake
         dynamic: bool = False
             Whether we accept dynamically altering the connections via ConnectionRequest objects.
-        num_threads: int = 1
-            If in dynamic mode, determines number of threads to allocate for thread pool handling websocket endpoints.
+        num_threads: int = 2
+            Determines number of threads to allocate for thread pool handling websocket endpoints.
+            Defaults to 2 to avoid deadlocks and latency spikes
         """
 
         self._properties = dict(dynamic=dynamic, num_threads=num_threads)

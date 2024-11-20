@@ -21,7 +21,8 @@ public:
         Engine * engine,
         WebsocketEndpointManager * websocketManager,
         size_t caller_id,
-        net::io_context& ioc
+        net::io_context& ioc,
+        boost::asio::strand<boost::asio::io_context::executor_type>& strand
         // bool dynamic
     );
 
@@ -32,7 +33,8 @@ public:
 private:
     WebsocketEndpointManager* m_websocketManager;
     size_t m_callerId;
-    net::io_context& m_ioc;
+    [[maybe_unused]] net::io_context& m_ioc;
+    boost::asio::strand<boost::asio::io_context::executor_type>& m_strand;
     // bool m_dynamic;
     // std::unordered_map<std::string, std::vector<bool>>& m_endpoint_consumers;
 };

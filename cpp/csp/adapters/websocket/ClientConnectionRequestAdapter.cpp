@@ -9,10 +9,13 @@ ClientConnectionRequestAdapter::ClientConnectionRequestAdapter(
     WebsocketEndpointManager * websocketManager,
     net::io_context& ioc,
     bool is_subscribe,
-    size_t caller_id
+    size_t caller_id,
+    boost::asio::strand<boost::asio::io_context::executor_type>& strand
+
 ) : OutputAdapter( engine ),  
     m_websocketManager( websocketManager ),
     m_ioc( ioc),
+    m_strand( strand ),
     m_isSubscribe( is_subscribe ),
     m_callerId( caller_id ),
     m_checkPerformed( is_subscribe ? false : true )  // we only need to check for pruned input adapters
@@ -37,7 +40,7 @@ void ClientConnectionRequestAdapter::executeImpl()
     // m_ioc to handle the connection request. We want to keep
     // all updates to internal data structures at graph run-time
     // to that thread.
-    boost::asio::post(m_ioc, [this, val=std::move(val)]() {
+    boost::asio::post(m_strand, [this, val=std::move(val)]() {
         for(const auto& conn_req: val) {
             m_websocketManager->handleConnectionRequest(conn_req, m_callerId, m_isSubscribe);
         }

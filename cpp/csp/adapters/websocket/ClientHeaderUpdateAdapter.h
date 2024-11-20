@@ -19,7 +19,8 @@ public:
     ClientHeaderUpdateOutputAdapter(
         Engine * engine,
         Dictionary& properties,
-        WebsocketEndpointManager * mgr
+        WebsocketEndpointManager * mgr,
+        boost::asio::strand<boost::asio::io_context::executor_type>& strand
     );
 
     void executeImpl() override;
@@ -29,6 +30,9 @@ public:
 private:
     [[maybe_unused]] Dictionary& m_properties;
     WebsocketEndpointManager * m_mgr;
+    boost::asio::strand<boost::asio::io_context::executor_type>& m_strand;
+
+    
 
 };
 

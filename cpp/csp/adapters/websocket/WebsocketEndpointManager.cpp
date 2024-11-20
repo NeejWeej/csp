@@ -4,8 +4,10 @@
 namespace csp::adapters::websocket {
 
 WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, const Dictionary & properties, Engine* engine ) 
-:   m_ioc(),
+:   m_num_threads( static_cast<size_t>(properties.get<int64_t>("num_threads")) ),
+    m_ioc( m_num_threads ),
     m_engine( engine ),
+    m_strand( boost::asio::make_strand(m_ioc) ),
     m_mgr( mgr ),
     m_active( false ), 
     m_shouldRun( false ), 
@@ -22,8 +24,7 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
     // m_work_guard(properties.get<bool>("dynamic") ? 
     //     std::make_optional(boost::asio::make_work_guard(m_ioc)) : 
     //     std::nullopt),
-    m_dynamic( properties.get<bool>("dynamic") )
-{
+    m_dynamic( properties.get<bool>("dynamic") ){
     // Total number of subscribe and send function calls, set on the adapter manager
     // when is it created. Note, that some of the input adapters might have been
     // pruned from the graph and won't get created.
@@ -49,21 +50,29 @@ WebsocketEndpointManager::WebsocketEndpointManager( ClientAdapterManager* mgr, c
 void WebsocketEndpointManager::start(DateTime starttime, DateTime endtime) {
         // maybe restart here?
     m_shouldRun = true;
-    m_thread = std::make_unique<std::thread>([this]() {
-        m_ioc.reset();
-        if( !m_dynamic ){
-            boost::asio::post(m_ioc, [this]() {
-                // We subscribe for both the subscribe and send calls
-                // But we probably should check here.
-                if( m_outputAdapters.size() == 1)
-                    handleConnectionRequest(Dictionary(m_properties), 0, false);
-                // // If we have an input adapter call AND it's not pruned.
-                if( m_inputAdapters.size() == 1 && !adapterPruned(0))
-                    handleConnectionRequest(Dictionary(m_properties), 0, true);
-            });
-        }
-        m_ioc.run();
-    });
+    // std::vector<std::thread> threads;
+
+    m_ioc.reset();
+    if( !m_dynamic ){
+        boost::asio::post(m_strand, [this]() {
+            // We subscribe for both the subscribe and send calls
+            // But we probably should check here.
+            if( m_outputAdapters.size() == 1)
+                handleConnectionRequest(Dictionary(m_properties), 0, false);
+            // // If we have an input adapter call AND it's not pruned.
+            if( m_inputAdapters.size() == 1 && !adapterPruned(0))
+                handleConnectionRequest(Dictionary(m_properties), 0, true);
+        });
+    }
+    for (auto i = 0; i < m_num_threads; ++i) {
+        m_threads.emplace_back(std::make_unique<std::thread>([this]() {
+            m_ioc.run();
+        }));
+    }
+    // m_thread = std::make_unique<std::thread>([this]() {
+    //     // m_ioc.reset();
+    //     m_ioc.run();
+    // });
 };
 
 bool WebsocketEndpointManager::adapterPruned( size_t caller_id ){
@@ -403,7 +412,7 @@ void WebsocketEndpointManager::stop() {
     // Stop all endpoints
     // Endpoints running on m_ioc thread,
     // So we call stop there
-    boost::asio::post(m_ioc, [this]() {
+    boost::asio::post(m_strand, [this]() {
         for (auto& [endpoint_id, _] : m_endpoints) {
             // TODO ponder
             // Since this is called from the main thread,
@@ -422,6 +431,16 @@ void WebsocketEndpointManager::stop() {
     m_ioc.stop();
     m_cv.notify_one();
     if( m_thread ) m_thread->join();
+    
+    // Wait for all threads to finish
+    for (auto& thread : m_threads) {
+        if (thread && thread->joinable()) {
+            thread->join();
+        }
+    }
+    
+    // Clear threads before other members are destroyed
+    m_threads.clear();
 };
 
 PushInputAdapter* WebsocketEndpointManager::getInputAdapter(CspTypePtr & type, PushMode pushMode, const Dictionary & properties)
@@ -445,7 +464,7 @@ OutputAdapter* WebsocketEndpointManager::getOutputAdapter( const Dictionary & pr
     assert(!properties.get<bool>("is_subscribe"));
     assert(m_outputAdapters.size() == validated_id);
 
-    auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>( this, validated_id, m_ioc );
+    auto output_adapter = m_engine -> createOwnedObject<ClientOutputAdapter>( this, validated_id, m_ioc, m_strand );
     m_outputAdapters[validated_id] = output_adapter;
     return m_outputAdapters[validated_id];
 };
@@ -453,7 +472,7 @@ OutputAdapter* WebsocketEndpointManager::getOutputAdapter( const Dictionary & pr
 OutputAdapter * WebsocketEndpointManager::getHeaderUpdateAdapter()
 {
     if (m_updateAdapter == nullptr)
-        m_updateAdapter = m_engine -> createOwnedObject<ClientHeaderUpdateOutputAdapter>( m_endpoint -> getProperties(), this );
+        m_updateAdapter = m_engine -> createOwnedObject<ClientHeaderUpdateOutputAdapter>( m_endpoint -> getProperties(), this, m_strand );
 
     return m_updateAdapter;
 };
@@ -465,7 +484,7 @@ OutputAdapter * WebsocketEndpointManager::getConnectionRequestAdapter( const Dic
     auto is_subscribe = properties.get<bool>("is_subscribe");
     
     auto* adapter = m_engine->createOwnedObject<ClientConnectionRequestAdapter>(
-        this, m_ioc, is_subscribe, caller_id
+        this, m_ioc, is_subscribe, caller_id, m_strand
     );
     m_connectionRequestAdapters.push_back(adapter);
     

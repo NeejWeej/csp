@@ -6,11 +6,13 @@ ClientOutputAdapter::ClientOutputAdapter(
     Engine * engine,
     WebsocketEndpointManager * websocketManager,
     size_t caller_id,
-    net::io_context& ioc
+    net::io_context& ioc,
+    boost::asio::strand<boost::asio::io_context::executor_type>& strand
 ) : OutputAdapter( engine ), 
     m_websocketManager( websocketManager ),
     m_callerId( caller_id ),
-    m_ioc( ioc )
+    m_ioc( ioc ),
+    m_strand( strand )
 { };
 
 void ClientOutputAdapter::executeImpl()
@@ -18,7 +20,7 @@ void ClientOutputAdapter::executeImpl()
     // TODO Add here picking the right endpoints to send to
     // Based on the caller id
     const std::string & value = input() -> lastValueTyped<std::string>();
-    boost::asio::post(m_ioc, [this, value=value]() {
+    boost::asio::post(m_strand, [this, value=value]() {
         // something something lifetime? Not sure
         m_websocketManager->send(value, m_callerId);
     });
