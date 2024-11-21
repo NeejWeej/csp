@@ -16,13 +16,18 @@ public:
         Engine * engine,
         CspTypePtr & type,
         PushMode pushMode,
-        const Dictionary & properties
+        const Dictionary & properties,
+        bool dynamic
     );
 
+    // void processMessage( void* c, size_t t, PushBatch* batch );
     void processMessage( void* c, size_t t, PushBatch* batch );
+    void processMessage( std::tuple<std::string, void*> data, size_t t, PushBatch* batch );
 
 private:
     adapters::utils::MessageStructConverterPtr m_converter;
+    int32_t m_callerId;
+    const bool m_dynamic;  // whether we are in dynamic mode
 
 };
 

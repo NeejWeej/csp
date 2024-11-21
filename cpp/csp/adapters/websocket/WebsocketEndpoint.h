@@ -5,6 +5,8 @@
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/system/error_code.hpp>
 
 #include <csp/engine/Dictionary.h>
 #include <csp/core/Exception.h>
@@ -23,6 +25,7 @@ namespace net = boost::asio;            // from <boost/asio.hpp>
 namespace ssl = boost::asio::ssl;       // from <boost/asio/ssl.hpp>
 namespace websocket = beast::websocket; // from <boost/beast/websocket.hpp>
 using tcp = boost::asio::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
+using error_code = boost::system::error_code; //from <boost/system/error_code.hpp>
 
 using string_cb = std::function<void(const std::string&)>;
 using char_cb = std::function<void(void*, size_t)>;
@@ -31,6 +34,7 @@ using void_cb = std::function<void()>;
 class BaseWebsocketSession {
 public:
     virtual void stop() { };
+    virtual void ping() { };
     virtual void send( const std::string& ) { };
     virtual void do_read() { };
     virtual void do_write(const std::string& ) { };
@@ -86,6 +90,13 @@ public:
             [ this ]( beast::error_code ec, std::size_t bytes_transfered )
             { handle_message( ec, bytes_transfered ); }
         );
+    }
+
+    void ping() override {
+        derived().ws().async_ping({},
+            [](beast::error_code ec) {
+                if(ec) CSP_THROW(RuntimeException, ec.message());
+            });
     }
 
     void stop() override 
@@ -340,7 +351,7 @@ private:
 
 class WebsocketEndpoint {
 public:
-    WebsocketEndpoint( Dictionary properties );
+    WebsocketEndpoint( net::io_context& ioc, Dictionary properties );
     virtual ~WebsocketEndpoint() { };
 
     void setOnOpen(void_cb on_open);
@@ -348,15 +359,17 @@ public:
     void setOnMessage(char_cb on_message);
     void setOnClose(void_cb on_close);
     void setOnSendFail(string_cb on_send_fail);
+    void updateHeaders(Dictionary properties);
     Dictionary& getProperties();
     void run();
-    void stop();
+    void stop( bool stop_ioc = true);
     void send(const std::string& s);
+    void ping();
 
 private:
     Dictionary m_properties;
     BaseWebsocketSession* m_session;
-    net::io_context m_ioc;
+    net::io_context& m_ioc;
     void_cb m_on_open;
     string_cb m_on_fail;
     char_cb m_on_message;

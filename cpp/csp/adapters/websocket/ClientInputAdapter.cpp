@@ -1,5 +1,5 @@
 #include <csp/adapters/websocket/ClientInputAdapter.h>
-
+#include <iostream>
 namespace csp::adapters::websocket
 {
 
@@ -7,8 +7,11 @@ ClientInputAdapter::ClientInputAdapter(
     Engine * engine,
     CspTypePtr & type,
     PushMode pushMode,
-    const Dictionary & properties
-) : PushInputAdapter(engine, type, pushMode)
+    const Dictionary & properties,
+    bool dynamic
+) : PushInputAdapter(engine, type, pushMode), 
+    m_callerId( properties.get<int64_t>("caller_id") ),
+    m_dynamic( dynamic ) 
 {
     if( type -> type() != CspType::Type::STRUCT &&
         type -> type() != CspType::Type::STRING )
@@ -21,8 +24,14 @@ ClientInputAdapter::ClientInputAdapter(
         if( !metaFieldMap.empty() && type -> type() != CspType::Type::STRUCT )
             CSP_THROW( ValueError, "meta_field_map is not supported on non-struct types" );
     }
+    if ( m_dynamic ){
+        auto& actual_type = static_cast<const CspStructType &>( *type );
+        auto& nested_type = actual_type.meta()-> field( "msg" ) -> type();
 
-    m_converter = adapters::utils::MessageStructConverterCache::instance().create( type, properties );
+        m_converter = adapters::utils::MessageStructConverterCache::instance().create( nested_type, properties );
+    }
+    else
+        m_converter = adapters::utils::MessageStructConverterCache::instance().create( type, properties );
 };
 
 void ClientInputAdapter::processMessage( void* c, size_t t, PushBatch* batch ) 
@@ -35,6 +44,53 @@ void ClientInputAdapter::processMessage( void* c, size_t t, PushBatch* batch )
     } else if ( dataType() -> type() == CspType::Type::STRING )
     {
         pushTick( std::string((char const*)c, t), batch );
+    }
+
+}
+
+void ClientInputAdapter::processMessage( std::tuple<std::string, void*> data, size_t t, PushBatch* batch ) 
+{
+    // Extract the source string and data pointer from tuple
+    std::string source = std::get<0>(data);
+    void* c = std::get<1>(data);
+    // std::cout << "Got data pointer: " << c << "\n";
+    // std::cout << "dynamic??\n";
+    // std::cout << "m_dynamic " << m_dynamic << "\n";
+    if ( m_dynamic ){
+        auto& actual_type = static_cast<const CspStructType &>( *dataType() );
+        // std::cout << "Got actual type " << "\n";
+        auto& nested_type = actual_type.meta()-> field( "msg" ) -> type();
+        // std::cout << "Got nested type " << "\n";
+        auto true_val = actual_type.meta() -> create();
+        // std::cout << "Got template struct " << "\n";
+        actual_type.meta()->field("uri")->setValue( true_val.get(), source );
+
+        if( nested_type -> type() == CspType::Type::STRUCT )
+        {
+            auto tick = m_converter -> asStruct( c, t );
+            actual_type.meta()->field("msg")->setValue( true_val.get(), std::move(tick) );
+
+            pushTick( std::move(true_val), batch );
+        } else if ( nested_type -> type() == CspType::Type::STRING )
+        {
+            // std::cout << "getting msg\n";
+            auto msg =  std::string((char const*)c, t);
+            // std::cout << "got message " << msg << "\n";
+            actual_type.meta()->field("msg")->setValue( true_val.get(), msg );
+
+            pushTick( std::move(true_val), batch );
+        }
+
+    }
+    else{
+        if( dataType() -> type() == CspType::Type::STRUCT )
+        {
+            auto tick = m_converter -> asStruct( c, t );
+            pushTick( std::move(tick), batch );
+        } else if ( dataType() -> type() == CspType::Type::STRING )
+        {
+            pushTick( std::string((char const*)c, t), batch );
+        }
     }
 
 }

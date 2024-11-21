@@ -3,9 +3,11 @@
 namespace csp::adapters::websocket {
 using namespace csp;
 
-WebsocketEndpoint::WebsocketEndpoint( 
+WebsocketEndpoint::WebsocketEndpoint(
+    net::io_context& ioc,
     Dictionary properties 
-) : m_properties(properties)
+) : m_properties(properties),
+    m_ioc(ioc)
 { };
 void WebsocketEndpoint::setOnOpen(void_cb on_open)
 { m_on_open = std::move(on_open); }
@@ -20,8 +22,7 @@ void WebsocketEndpoint::setOnSendFail(string_cb on_send_fail)
 
 void WebsocketEndpoint::run()
 {
-
-    m_ioc.reset();
+    // Owns this ioc object
     if(m_properties.get<bool>("use_ssl")) {
         ssl::context ctx{ssl::context::sslv23};
         ctx.set_verify_mode(ssl::context::verify_peer );
@@ -49,16 +50,24 @@ void WebsocketEndpoint::run()
         );
     }
     m_session->run();
-
-    m_ioc.run();
 }
 
-void WebsocketEndpoint::stop()
-{ 
-    m_ioc.stop();
+void WebsocketEndpoint::stop( bool stop_ioc )
+{
+    if( stop_ioc ) 
+        m_ioc.stop();
     if(m_session) m_session->stop(); 
 }
 
+void WebsocketEndpoint::updateHeaders(csp::Dictionary properties){
+    DictionaryPtr headers = m_properties.get<DictionaryPtr>("headers");
+    for (auto it = properties.begin(); it != properties.end(); ++it) {
+        std::string key = it.key();
+        // std::cout<< "Key: " << key << "\n";
+        auto value = it.value<std::string>();
+        headers->update(key, std::move(value));
+    }
+}
 
 csp::Dictionary& WebsocketEndpoint::getProperties() {
     return m_properties;
@@ -66,6 +75,7 @@ csp::Dictionary& WebsocketEndpoint::getProperties() {
 
 void WebsocketEndpoint::send(const std::string& s)
 { if(m_session) m_session->send(s); }
-
+void WebsocketEndpoint::ping()
+{ if(m_session) m_session->ping(); }
 
 }
