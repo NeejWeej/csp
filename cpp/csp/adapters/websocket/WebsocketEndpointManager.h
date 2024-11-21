@@ -92,6 +92,7 @@ public:
 
     void send(const std::string& value, const size_t& caller_id);
     bool adapterPruned( size_t caller_id );
+    bool publishesToEndpoint(const size_t caller_id, const std::string& endpoint_id);
     void start(DateTime starttime, DateTime endtime);
     void stop();
     void handleConnectionRequest(const Dictionary & properties, size_t validated_id, bool is_subscribe);

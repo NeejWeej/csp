@@ -70,19 +70,35 @@ bool WebsocketEndpointManager::adapterPruned( size_t caller_id ){
     return m_inputAdapters[caller_id] == nullptr;
 };
 
+bool WebsocketEndpointManager::publishesToEndpoint(const size_t caller_id, const std::string& endpoint_id){
+    auto config_it = m_endpoint_configs.find(endpoint_id); 
+    if( config_it == m_endpoint_configs.end() || config_it->second.shutting_down || config_it->second.attempting_reconnect)
+        return false;
+
+    return caller_id < m_endpoint_producers[endpoint_id].size() && 
+    m_endpoint_producers[endpoint_id][caller_id];
+}
+
 void WebsocketEndpointManager::send(const std::string& value, const size_t& caller_id) {
     // Safety check for caller_id
     // Get all endpoints this producer is connected to
     const auto& endpoints = m_producer_endpoints[caller_id];
-    
+    // std::cout << " WHAT THE FUCK!!!\n";
     // For each endpoint this producer is connected to
     for (const auto& endpoint_id : endpoints) {
         // Double check the endpoint exists and producer is still valid
-        if (auto it = m_endpoints.find(endpoint_id); 
-            it != m_endpoints.end() && 
-            caller_id < m_endpoint_producers[endpoint_id].size() && 
-            m_endpoint_producers[endpoint_id][caller_id]) {
-            it->second.get()->send(value);
+        // if (auto it = m_endpoints.find(endpoint_id); 
+        //     it != m_endpoints.end() && 
+        //     caller_id < m_endpoint_producers[endpoint_id].size() && 
+        //     m_endpoint_producers[endpoint_id][caller_id]) {
+        //         it->second.get()->send(value);
+        //     // boost::asio::post(m_ioc, [endpoint_id, value, ep = it->second.get()]() {
+        //     //     ep->send(value);
+        //     // });
+        if(publishesToEndpoint(caller_id, endpoint_id)) {
+            auto it = m_endpoints.find(endpoint_id);
+            if( it != m_endpoints.end())
+                it->second.get()->send(value);
             // boost::asio::post(m_ioc, [endpoint_id, value, ep = it->second.get()]() {
             //     ep->send(value);
             // });
