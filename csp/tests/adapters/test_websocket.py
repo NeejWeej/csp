@@ -2,77 +2,76 @@ import os
 import pytest
 import pytz
 import threading
+import tornado.ioloop
+import tornado.web
+import tornado.websocket
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional, Type
 
 import csp
 from csp import ts
-
-if os.environ.get("CSP_TEST_WEBSOCKET"):
-    import tornado.ioloop
-    import tornado.web
-    import tornado.websocket
-
-    from csp.adapters.websocket import (
-        ActionType,
-        ConnectionRequest,
-        JSONTextMessageMapper,
-        RawTextMessageMapper,
-        Status,
-        WebsocketAdapterManager,
-        WebsocketHeaderUpdate,
-        WebsocketStatus,
-    )
-
-    class EchoWebsocketHandler(tornado.websocket.WebSocketHandler):
-        def on_message(self, msg):
-            # Carve-out to allow inspecting the headers
-            if msg == "header1":
-                msg = self.request.headers.get(msg, "")
-            elif not isinstance(msg, str) and msg.decode("utf-8") == "header1":
-                # Need this for bytes
-                msg = self.request.headers.get("header1", "")
-            return self.write_message(msg)
-
-    @contextmanager
-    def create_tornado_server(port: int):
-        """Base context manager for creating a Tornado server in a thread"""
-        ready_event = threading.Event()
-        io_loop = None
-        app = None
-        io_thread = None
-
-        def run_io_loop():
-            nonlocal io_loop, app
-            io_loop = tornado.ioloop.IOLoop()
-            io_loop.make_current()
-            app = tornado.web.Application([(r"/", EchoWebsocketHandler)])
-            app.listen(port)
-            ready_event.set()
-            io_loop.start()
-
-        io_thread = threading.Thread(target=run_io_loop)
-        io_thread.start()
-        ready_event.wait()
-
-        try:
-            yield io_loop, app, io_thread
-        finally:
-            io_loop.add_callback(io_loop.stop)
-            if io_thread:
-                io_thread.join(timeout=5)
-                if io_thread.is_alive():
-                    raise RuntimeError("IOLoop failed to stop")
-
-    @contextmanager
-    def tornado_server(port: int = 8001):
-        """Simplified context manager that uses the base implementation"""
-        with create_tornado_server(port) as (_io_loop, _app, _io_thread):
-            yield
+from csp.adapters.websocket import (
+    ActionType,
+    ConnectionRequest,
+    JSONTextMessageMapper,
+    RawTextMessageMapper,
+    Status,
+    WebsocketAdapterManager,
+    WebsocketHeaderUpdate,
+    WebsocketStatus,
+)
 
 
-@pytest.mark.skipif(os.environ.get("CSP_TEST_WEBSOCKET") is None, reason="'CSP_TEST_WEBSOCKET' env variable is not set")
+class EchoWebsocketHandler(tornado.websocket.WebSocketHandler):
+    def on_message(self, msg):
+        # Carve-out to allow inspecting the headers
+        if msg == "header1":
+            msg = self.request.headers.get(msg, "")
+        elif not isinstance(msg, str) and msg.decode("utf-8") == "header1":
+            # Need this for bytes
+            msg = self.request.headers.get("header1", "")
+        return self.write_message(msg)
+
+
+@contextmanager
+def create_tornado_server(port: int):
+    """Base context manager for creating a Tornado server in a thread"""
+    ready_event = threading.Event()
+    io_loop = None
+    app = None
+    io_thread = None
+
+    def run_io_loop():
+        nonlocal io_loop, app
+        io_loop = tornado.ioloop.IOLoop()
+        io_loop.make_current()
+        app = tornado.web.Application([(r"/", EchoWebsocketHandler)])
+        app.listen(port)
+        ready_event.set()
+        io_loop.start()
+
+    io_thread = threading.Thread(target=run_io_loop)
+    io_thread.start()
+    ready_event.wait()
+
+    try:
+        yield io_loop, app, io_thread
+    finally:
+        io_loop.add_callback(io_loop.stop)
+        if io_thread:
+            io_thread.join(timeout=5)
+            if io_thread.is_alive():
+                raise RuntimeError("IOLoop failed to stop")
+
+
+@contextmanager
+def tornado_server(port: int = 8001):
+    """Simplified context manager that uses the base implementation"""
+    with create_tornado_server(port) as (_io_loop, _app, _io_thread):
+        yield
+
+
 class TestWebsocket:
     @pytest.fixture(scope="class", autouse=True)
     def setup_tornado(self, request):
