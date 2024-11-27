@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <iostream>
 
 namespace csp
 {
@@ -670,10 +671,22 @@ private:
 template<typename T>
 std::shared_ptr<typename StructField::upcast<T>::type> StructMeta::getMetaField( const char * fieldname, const char * expectedtype )
 {
+    static_assert(std::is_same_v<StringStructField::CType, std::string>, 
+        "CType should resolve to std::string");
+    static_assert(std::is_same_v<csp::CspType::StringCType, std::string>,
+        "StringCType should resolve to std::string");
     auto field_ = field( fieldname );
     if( !field_ )
         CSP_THROW( TypeError, "Struct type " << name() << " missing required field " << fieldname << " for " << expectedtype );
 
+    std::cout << "Debug info:" << std::endl
+        << "1. Target type: " << typeid(typename StructField::upcast<T>::type).name() << std::endl
+        << "2. Field pointer type: " << typeid(field_).name() << std::endl
+        << "3. Is field null: " << (field_ == nullptr) << std::endl;
+
+    if (field_) {
+        std::cout << "4. Field runtime type: " << field_->type()->type() << std::endl;
+    }
     std::shared_ptr<typename StructField::upcast<T>::type> typedfield = std::dynamic_pointer_cast<typename StructField::upcast<T>::type>( field_ );
     if( !typedfield )
         CSP_THROW( TypeError, expectedtype << " - provided struct type " << name() << " expected type " << CspType::Type::fromCType<T>::type << " for field " << fieldname
